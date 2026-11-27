@@ -6,13 +6,14 @@ export const MISSIONS = [
     id: 'nusa-mail',
     name: 'Nusa Indah Mail Run',
     difficulty: 'ROOKIE',
-    description: 'Pelabuhan Utama → Pulau Hijau • 6 lagoon rings • Calm sea breeze',
+    threatSummary: '3 Kestrel Scouts',
+    description: 'Pelabuhan Utama → Pulau Hijau • 6 rings • Intercept 3 Kestrel Scouts',
     startStrip: 'pelabuhan',
     destStrip: 'hijau',
     startFuel: 100,
     windSpeedKt: 4,
     windDirDeg: 68,
-    parTimeSec: 75,
+    parTimeSec: 95,
     rings: [
       { x: -515, y: 50, z: 385, headingDeg: 28 },
       { x: -545, y: 86, z: 265, headingDeg: 5 },
@@ -26,13 +27,14 @@ export const MISSIONS = [
     id: 'gunung-api',
     name: 'Gunung Api Medical Express',
     difficulty: 'INTERMEDIATE',
-    description: 'Pulau Hijau → Kampung Timur • Climb the smoking volcano • Tight fuel',
+    threatSummary: '2 Kestrels + 2 Komodo Gunships',
+    description: 'Pulau Hijau → Kampung Timur • Volcano climb • 2 Kestrels & 2 Gunships',
     startStrip: 'hijau',
     destStrip: 'timur',
-    startFuel: 84,
+    startFuel: 88,
     windSpeedKt: 7,
     windDirDeg: 112,
-    parTimeSec: 120,
+    parTimeSec: 135,
     rings: [
       { x: 50, y: 74, z: -505, headingDeg: 46 },
       { x: 260, y: 174, z: -640, headingDeg: 66 },
@@ -47,13 +49,14 @@ export const MISSIONS = [
     id: 'karang-slalom',
     name: 'Karang Reef Island Hopper',
     difficulty: 'VETERAN',
-    description: 'Kampung Timur → Teluk Barat • Low karst slalom • 10 kt crosswind',
+    threatSummary: 'Raiders + Ace Elang Merah',
+    description: 'Kampung Timur → Teluk Barat • Karst slalom • Defeat Ace Elang Merah',
     startStrip: 'timur',
     destStrip: 'barat',
-    startFuel: 80,
+    startFuel: 84,
     windSpeedKt: 10,
     windDirDeg: 215,
-    parTimeSec: 125,
+    parTimeSec: 145,
     rings: [
       { x: 560, y: 74, z: -220, headingDeg: 315 },
       { x: 290, y: 98, z: -330, headingDeg: 270 },
@@ -68,13 +71,14 @@ export const MISSIONS = [
     id: 'grand-circuit',
     name: 'Nusantara Grand Circuit',
     difficulty: 'ACE',
-    description: 'Teluk Barat → Pelabuhan Utama • 8-ring archipelago sprint • Fuel discipline',
+    threatSummary: 'Escorts + Boss Naga Langit',
+    description: 'Teluk Barat → Pelabuhan Utama • 8 rings • Destroy Boss Naga Langit Airship',
     startStrip: 'barat',
     destStrip: 'pelabuhan',
-    startFuel: 76,
+    startFuel: 82,
     windSpeedKt: 9,
     windDirDeg: 310,
-    parTimeSec: 145,
+    parTimeSec: 175,
     rings: [
       { x: -840, y: 76, z: -150, headingDeg: 145 },
       { x: -640, y: 108, z: 10, headingDeg: 105 },
@@ -89,7 +93,8 @@ export const MISSIONS = [
 ];
 
 /**
- * Create the 3D target ring manager, runway approach marker, and sortie scoring engine.
+ * Create the 3D courier ring manager, runway approach marker, and combined
+ * Combat + Courier sortie scoring engine.
  */
 export function createMissionManager(scene) {
   const ringGroup = new THREE.Group();
@@ -99,28 +104,25 @@ export function createMissionManager(scene) {
   const activeInnerMat = new THREE.MeshBasicMaterial({
     color: '#4fe3d8',
     transparent: true,
-    opacity: 0.72,
+    opacity: 0.78,
     side: THREE.DoubleSide,
   });
   const upcomingOuterMat = new THREE.MeshBasicMaterial({
     color: '#5ec9e8',
     transparent: true,
-    opacity: 0.52,
+    opacity: 0.5,
   });
   const passedOuterMat = new THREE.MeshBasicMaterial({
     color: '#3ee08e',
     transparent: true,
-    opacity: 0.18,
+    opacity: 0.16,
   });
 
-  // Floating runway landing beacon above destination strip
   const landingBeaconGroup = new THREE.Group();
-  const beaconConeMat = new THREE.MeshBasicMaterial({
-    color: '#3ee08e',
-    transparent: true,
-    opacity: 0.85,
-  });
-  const beaconCone = new THREE.Mesh(new THREE.ConeGeometry(7.5, 16, 4), beaconConeMat);
+  const beaconCone = new THREE.Mesh(
+    new THREE.ConeGeometry(7.5, 16, 4),
+    new THREE.MeshBasicMaterial({ color: '#3ee08e', transparent: true, opacity: 0.85 })
+  );
   beaconCone.rotation.x = Math.PI;
   landingBeaconGroup.add(beaconCone);
 
@@ -139,7 +141,7 @@ export function createMissionManager(scene) {
   let ringsHit = 0;
   let bullseyes = 0;
   let elapsedSec = 0;
-  let prevPlanePos = new THREE.Vector3();
+  const prevPlanePos = new THREE.Vector3();
   let hasPrevPos = false;
 
   function clearRings() {
@@ -154,15 +156,12 @@ export function createMissionManager(scene) {
     wrap.position.set(spec.x, spec.y, spec.z);
     wrap.rotation.y = -(spec.headingDeg * Math.PI) / 180;
 
-    // Bold glowing outer torus
-    const outer = new THREE.Mesh(new THREE.TorusGeometry(20, 1.35, 12, 36), activeOuterMat);
+    const outer = new THREE.Mesh(new THREE.TorusGeometry(20, 1.4, 12, 36), activeOuterMat);
     wrap.add(outer);
 
-    // Translucent cyan inner energy hoop
-    const inner = new THREE.Mesh(new THREE.TorusGeometry(16.6, 0.55, 8, 32), activeInnerMat);
+    const inner = new THREE.Mesh(new THREE.TorusGeometry(16.6, 0.58, 8, 32), activeInnerMat);
     wrap.add(inner);
 
-    // Four glowing directional chevrons around the ring rim
     const chevGeo = new THREE.ConeGeometry(2.3, 4.6, 4);
     for (let i = 0; i < 4; i++) {
       const ang = (i * Math.PI) / 2;
@@ -227,6 +226,15 @@ export function createMissionManager(scene) {
     refreshRingStyles();
   }
 
+  function setActiveRingPoseForShot(x, y, z, headingDeg) {
+    if (currentRingIdx < ringMeshes.length) {
+      const r = ringMeshes[currentRingIdx];
+      r.pos.set(x, y, z);
+      r.wrap.position.set(x, y, z);
+      r.wrap.rotation.y = -(headingDeg * Math.PI) / 180;
+    }
+  }
+
   function getActiveTarget() {
     const dest = getAirstripById(currentMission.destStrip);
     if (currentRingIdx < ringMeshes.length) {
@@ -247,16 +255,12 @@ export function createMissionManager(scene) {
     };
   }
 
-  /**
-   * Update ring animations, timer, and check if the plane flew through the active ring.
-   */
   function update(dt, elapsed, planePos, isFlying) {
     let event = null;
     if (isFlying) {
       elapsedSec += dt;
     }
 
-    // Animate active ring & destination landing beacon
     if (currentRingIdx < ringMeshes.length) {
       const active = ringMeshes[currentRingIdx];
       active.inner.rotation.z = elapsed * 1.6;
@@ -275,11 +279,9 @@ export function createMissionManager(scene) {
     );
     beaconCone.rotation.y = elapsed * 2.1;
 
-    // Gate passage detection (checks segment from prevPos to planePos for reliability at high speed!)
     if (isFlying && currentRingIdx < ringMeshes.length) {
       const active = ringMeshes[currentRingIdx];
-      const distNow = planePos.distanceTo(active.pos);
-      let closestDist = distNow;
+      let closestDist = planePos.distanceTo(active.pos);
       if (hasPrevPos) {
         const seg = new THREE.Vector3().subVectors(planePos, prevPlanePos);
         const segLenSq = seg.lengthSq();
@@ -335,12 +337,14 @@ export function createMissionManager(scene) {
   }
 
   /**
-   * Compute full courier sortie score breakdown on successful runway landing.
+   * Compute combined Combat + Courier sortie score breakdown on successful landing.
    */
-  function calculateScore(flightState) {
-    const ringScore = ringsHit * 250 + bullseyes * 75;
+  function calculateScore(flightState, combatScore) {
+    const cs = combatScore || { kills: 0, raiderScore: 0, bossBounty: 0, totalCombatScore: 0, accuracyPct: 0 };
+    const allRings = ringsHit >= ringMeshes.length;
+    const ringScore = Math.round((ringsHit * 250 + bullseyes * 75) * (allRings ? 1.15 : 1.0));
     const parDiff = Math.max(0, currentMission.parTimeSec - elapsedSec);
-    const timeBonus = Math.round(350 + Math.min(900, parDiff * 16));
+    const timeBonus = Math.round(350 + Math.min(900, parDiff * 14));
 
     const grade = flightState.landingRecord.grade || 'SMOOTH';
     const landingTable = { BUTTER: 1500, SMOOTH: 1050, FIRM: 650, HARD: 250 };
@@ -348,14 +352,18 @@ export function createMissionManager(scene) {
 
     const fuelBonus = Math.round(flightState.fuel * 10);
     const hullPct = Math.max(0, Math.round(100 - flightState.damage));
-    const hullBonus = hullPct * 5;
+    const hullBonus = hullPct * 6;
 
-    const total = ringScore + timeBonus + landingBonus + fuelBonus + hullBonus;
-    const rank = total >= 3900 ? 'S' : total >= 3100 ? 'A' : total >= 2300 ? 'B' : 'C';
+    const total = cs.raiderScore + cs.bossBounty + ringScore + timeBonus + landingBonus + fuelBonus + hullBonus;
+    const rank = total >= 5400 ? 'S' : total >= 4200 ? 'A' : total >= 3000 ? 'B' : 'C';
 
     return {
       missionName: currentMission.name,
       destName: getAirstripById(currentMission.destStrip).name,
+      kills: cs.kills,
+      raiderScore: cs.raiderScore,
+      bossBounty: cs.bossBounty,
+      accuracyPct: cs.accuracyPct,
       ringsHit,
       totalRings: ringMeshes.length,
       bullseyes,
@@ -379,6 +387,7 @@ export function createMissionManager(scene) {
     missions: MISSIONS,
     loadMission,
     setProgressForShot,
+    setActiveRingPoseForShot,
     update,
     calculateScore,
   };

@@ -8,7 +8,8 @@ function formatTime(sec) {
 }
 
 /**
- * Aviation HUD, compass tape, chase-view mini-instruments, mission selector, and debrief panels.
+ * Core flight telemetry HUD, heading compass tape with hostile bearing bug,
+ * chase-view mini-attitude + combat radar, mission selector, and Combat + Courier debrief panels.
  */
 export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, onMenu }) {
   const compassCanvas = document.getElementById('compass-canvas');
@@ -17,6 +18,7 @@ export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, o
 
   const objText = document.getElementById('obj-text');
   const objRings = document.getElementById('obj-rings');
+  const objHostiles = document.getElementById('obj-hostiles');
   const objDist = document.getElementById('obj-dist');
   const objTimer = document.getElementById('obj-timer');
 
@@ -83,7 +85,7 @@ export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, o
     });
   }
 
-  function drawCompass(headingDeg, targetBearingDeg) {
+  function drawCompass(headingDeg, targetBearingDeg, enemyBearingDeg) {
     const ctx = compassCtx;
     const W = compassCanvas.width;
     const H = compassCanvas.height;
@@ -94,7 +96,6 @@ export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, o
     const cardinals = { 0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW' };
 
     ctx.strokeStyle = 'rgba(200, 224, 240, 0.55)';
-    ctx.fillStyle = '#dcebf6';
     ctx.font = 'bold 11px monospace';
     ctx.textAlign = 'center';
 
@@ -119,9 +120,9 @@ export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, o
       }
     }
 
-    // Golden waypoint bearing diamond bug
-    let diff = ((targetBearingDeg - headingDeg + 540) % 360) - 180;
-    const bx = Math.max(12, Math.min(W - 12, center + diff * pxPerDeg));
+    // Cyan courier waypoint diamond bug
+    const wpDiff = ((targetBearingDeg - headingDeg + 540) % 360) - 180;
+    const bx = Math.max(12, Math.min(W - 12, center + wpDiff * pxPerDeg));
     ctx.fillStyle = '#4fe3d8';
     ctx.beginPath();
     ctx.moveTo(bx, H - 2);
@@ -130,6 +131,19 @@ export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, o
     ctx.lineTo(bx - 6, H - 10);
     ctx.closePath();
     ctx.fill();
+
+    // Crimson locked-hostile bearing bug
+    if (enemyBearingDeg !== null && enemyBearingDeg !== undefined) {
+      const eDiff = ((enemyBearingDeg - headingDeg + 540) % 360) - 180;
+      const ex = Math.max(12, Math.min(W - 12, center + eDiff * pxPerDeg));
+      ctx.fillStyle = '#ff4444';
+      ctx.beginPath();
+      ctx.moveTo(ex, H - 18);
+      ctx.lineTo(ex + 6, H - 7);
+      ctx.lineTo(ex - 6, H - 7);
+      ctx.closePath();
+      ctx.fill();
+    }
   }
 
   function drawMiniAttitude(pitchRad, rollRad) {
@@ -162,7 +176,6 @@ export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, o
     ctx.stroke();
     ctx.restore();
 
-    // Fixed wings symbol
     ctx.strokeStyle = '#ffd36b';
     ctx.lineWidth = 2.8;
     ctx.beginPath();
@@ -175,27 +188,27 @@ export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, o
     ctx.stroke();
     ctx.restore();
 
-    ctx.strokeStyle = 'rgba(247, 183, 51, 0.7)';
+    ctx.strokeStyle = 'rgba(247, 183, 51, 0.72)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.stroke();
   }
 
-  function drawMiniRadar(telemetry) {
+  function drawMiniRadar(telemetry, enemiesList) {
     const ctx = miniRadCtx;
     const W = miniRadCanvas.width;
     const H = miniRadCanvas.height;
     const cx = W * 0.5;
     const cy = H * 0.54;
-    const scale = 0.032;
+    const scale = 0.038;
 
     ctx.fillStyle = '#071722';
     ctx.fillRect(0, 0, W, H);
 
     ctx.strokeStyle = 'rgba(79, 227, 216, 0.24)';
     ctx.lineWidth = 1;
-    for (const r of [20, 40]) {
+    for (const r of [20, 42]) {
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.stroke();
@@ -210,7 +223,7 @@ export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, o
     };
 
     const [vx, vy] = toPt(VOLCANO_POS.x, VOLCANO_POS.z);
-    ctx.fillStyle = 'rgba(255, 114, 58, 0.5)';
+    ctx.fillStyle = 'rgba(255, 114, 58, 0.45)';
     ctx.beginPath();
     ctx.arc(vx, vy, 8, 0, Math.PI * 2);
     ctx.fill();
@@ -233,11 +246,38 @@ export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, o
 
       ctx.fillStyle = '#ffd36b';
       ctx.beginPath();
-      ctx.arc(tx, ty, 4, 0, Math.PI * 2);
+      ctx.arc(tx, ty, 3.8, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Plane icon
+    // Hostile red triangles & pulsing crimson-gold boss diamond on chase combat radar
+    if (enemiesList) {
+      for (const e of enemiesList) {
+        const [ex, ey] = toPt(e.pos.x, e.pos.z);
+        if (e.isBoss) {
+          ctx.fillStyle = '#ff3838';
+          ctx.strokeStyle = '#ffd356';
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.moveTo(ex, ey - 6);
+          ctx.lineTo(ex + 6, ey);
+          ctx.lineTo(ex, ey + 6);
+          ctx.lineTo(ex - 6, ey);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = '#ff4444';
+          ctx.beginPath();
+          ctx.moveTo(ex, ey - 4.8);
+          ctx.lineTo(ex + 4.4, ey + 3.6);
+          ctx.lineTo(ex - 4.4, ey + 3.6);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
+
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.moveTo(cx, cy - 6);
@@ -248,7 +288,7 @@ export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, o
 
     ctx.fillStyle = '#4fe3d8';
     ctx.font = 'bold 9px monospace';
-    ctx.fillText('RADAR', 6, 12);
+    ctx.fillText('COMBAT RADAR', 6, 12);
   }
 
   function showTitle(visible) {
@@ -258,76 +298,84 @@ export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, o
 
   function showLandingResult(score) {
     resultOverlay.classList.remove('hidden', 'crash');
-    resultKicker.textContent = 'MERPATI COURIER LOGBOOK';
+    resultKicker.textContent = 'STORM INTERCEPTOR SORTIE DEBRIEF';
     resultTitle.innerHTML = `MISSION COMPLETE <span class="rank-badge">${score.rank}</span>`;
     resultSubtitle.textContent = `${score.grade} touchdown at ${score.destName} (${score.touchdownVsi.toFixed(1)} m/s sink, ${score.bounceCount} bounce${score.bounceCount === 1 ? '' : 's'}).`;
     btnNext.style.display = 'block';
 
+    const bossRow = score.bossBounty > 0
+      ? `<div class="score-row highlight"><span>ACE / BOSS BOUNTY</span><strong>+${score.bossBounty.toLocaleString()}</strong></div>`
+      : '';
+
     resultScores.innerHTML = `
-      <div class="score-row"><span>RINGS CLEARED (${score.ringsHit}/${score.totalRings})</span><strong>+${score.ringScore}</strong></div>
+      <div class="score-row"><span>HOSTILES DESTROYED (${score.kills})</span><strong>+${score.raiderScore.toLocaleString()}</strong></div>
+      ${bossRow}
+      <div class="score-row"><span>RINGS CLEARED (${score.ringsHit}/${score.totalRings})</span><strong>+${score.ringScore.toLocaleString()}</strong></div>
       <div class="score-row"><span>FLIGHT TIME (${formatTime(score.elapsedSec)})</span><strong>+${score.timeBonus}</strong></div>
-      <div class="score-row"><span>LANDING (${score.grade})</span><strong>+${score.landingBonus}</strong></div>
-      <div class="score-row"><span>FUEL REMAINING (${score.fuelPct}%)</span><strong>+${score.fuelBonus}</strong></div>
-      <div class="score-row"><span>AIRFRAME INTEGRITY (${score.hullPct}%)</span><strong>+${score.hullBonus}</strong></div>
+      <div class="score-row"><span>LANDING GRADE (${score.grade})</span><strong>+${score.landingBonus}</strong></div>
+      <div class="score-row"><span>FUEL (${score.fuelPct}%) &amp; HULL (${score.hullPct}%)</span><strong>+${score.fuelBonus + score.hullBonus}</strong></div>
       <div class="score-row total"><span>TOTAL SORTIE SCORE</span><strong>${score.total.toLocaleString()}</strong></div>
     `;
-    srStatus.textContent = `Mission complete! ${score.grade} landing, total score ${score.total}.`;
+    srStatus.textContent = `Mission complete! ${score.kills} hostiles destroyed, ${score.grade} landing, total score ${score.total}.`;
   }
 
-  function showCrashResult(reason, missionInfo, flightState) {
+  function showCrashResult(reason, missionInfo, flightState, combatState) {
     resultOverlay.classList.remove('hidden');
     resultOverlay.classList.add('crash');
-    resultKicker.textContent = 'INCIDENT REPORT — PK-MRP';
-    resultTitle.textContent = 'AIRCRAFT CRASHED';
+    resultKicker.textContent = 'COMBAT INCIDENT REPORT — PK-MRP';
+    resultTitle.textContent = flightState.damage >= 100 && reason.startsWith('Shot down') ? 'AIRCRAFT SHOT DOWN' : 'AIRCRAFT CRASHED';
     resultSubtitle.textContent = reason;
     btnNext.style.display = 'none';
 
     resultScores.innerHTML = `
-      <div class="score-row"><span>MISSION</span><strong>${missionInfo.mission.name}</strong></div>
+      <div class="score-row"><span>SORTIE</span><strong>${missionInfo.mission.name}</strong></div>
+      <div class="score-row"><span>HOSTILES DESTROYED</span><strong>${combatState ? combatState.kills : 0}</strong></div>
       <div class="score-row"><span>RINGS CLEARED</span><strong>${missionInfo.ringsHit}/${missionInfo.totalRings}</strong></div>
       <div class="score-row"><span>FLIGHT TIME</span><strong>${formatTime(missionInfo.elapsedSec)}</strong></div>
       <div class="score-row"><span>FUEL REMAINING</span><strong>${Math.round(flightState.fuel)}%</strong></div>
     `;
-    srStatus.textContent = `Aircraft crashed: ${reason}`;
+    srStatus.textContent = `Aircraft lost: ${reason}`;
   }
 
   function hideResult() {
     resultOverlay.classList.add('hidden');
   }
 
-  function update(dt, telemetry, missionInfo, cameraMode, gameState) {
-    // Compass & Heading
+  function update(dt, telemetry, missionInfo, cameraMode, gameState, combatState, enemiesList, lockedBearingDeg) {
     const hdg = Math.round(telemetry.headingDeg) % 360;
     hdgReadout.textContent = `HDG ${String(hdg).padStart(3, '0')}°`;
-    drawCompass(telemetry.headingDeg, missionInfo.targetBearingDeg);
+    drawCompass(telemetry.headingDeg, missionInfo.targetBearingDeg, lockedBearingDeg);
 
-    // Mission objective banner
+    const remaining = combatState ? combatState.hostilesRemaining : 0;
     if (gameState === 'landed') {
-      objText.textContent = `DELIVERY COMPLETE — ${missionInfo.destName.toUpperCase()} RUNWAY`;
+      objText.textContent = `SORTIE COMPLETE — ${missionInfo.destName.toUpperCase()} SECURED`;
     } else if (gameState === 'crashed') {
-      objText.textContent = `MAYDAY — SORTIE TERMINATED`;
-    } else if (missionInfo.targetType === 'ring') {
-      objText.textContent =
-        telemetry.onGround && gameState === 'flying'
-          ? `TAKE OFF — ADVANCE THROTTLE (SHIFT) TO RING ${missionInfo.ringsHit + 1}`
-          : `FLY THROUGH RING ${missionInfo.ringsHit + 1} → ${missionInfo.destName.toUpperCase()}`;
+      objText.textContent = `MAYDAY — PK-MRP LOST`;
+    } else if (telemetry.onGround && gameState === 'flying' && missionInfo.elapsedSec < 8) {
+      objText.textContent = `SCRAMBLE — SHIFT THROTTLE • SPACE GUNS • X MISSILES`;
+    } else if (remaining > 0) {
+      objText.textContent = `INTERCEPT RAIDERS (${remaining} LEFT) → ${missionInfo.destName.toUpperCase()}`;
     } else {
-      objText.textContent = `LAND AT ${missionInfo.destName.toUpperCase()} — FLARE & BRAKE (SPACE)`;
+      objText.textContent = `AIRSPACE CLEAR — LAND AT ${missionInfo.destName.toUpperCase()} (B BRAKE)`;
     }
+
     objRings.textContent = `RINGS ${missionInfo.ringsHit}/${missionInfo.totalRings}`;
+    objHostiles.textContent = remaining > 0 ? `HOSTILES ${remaining}` : 'SKIES CLEAR';
+    objHostiles.classList.toggle('clear', remaining === 0);
     objDist.textContent = `DIST ${Math.round(missionInfo.targetDist)}m`;
     objTimer.textContent = formatTime(missionInfo.elapsedSec);
 
-    // Left tape
+    // Left flight tape
     valSpd.textContent = String(Math.round(telemetry.airspeedKt));
     const thrPct = Math.round(telemetry.throttle * 100);
-    valThrPct.textContent = `${thrPct}%`;
+    valThrPct.textContent = telemetry.wepActive ? `WEP ${thrPct}%` : `${thrPct}%`;
     barThr.style.width = `${thrPct}%`;
+    barThr.classList.toggle('wep', telemetry.wepActive);
     valFlaps.textContent = `${telemetry.flapsDeg}°`;
     valView.textContent = cameraMode === 'cockpit' ? 'COCKPIT' : 'CHASE';
     valWind.textContent = `${telemetry.windSpeedKt} KT`;
 
-    // Right tape
+    // Right flight tape
     valAlt.textContent = String(Math.round(telemetry.altitudeFt));
     const vsi = Math.round(telemetry.vsiFpm / 10) * 10;
     valVsi.textContent = `${vsi >= 0 ? '+' : ''}${vsi}`;
@@ -340,14 +388,13 @@ export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, o
     valHullPct.textContent = `${hullPct}%`;
     barHull.style.width = `${hullPct}%`;
 
-    // Mini instruments visible in Chase View (Cockpit view has the full 3D glowing dash!)
+    // Mini instruments visible in Chase View
     instrumentsBox.classList.toggle('hidden', cameraMode === 'cockpit');
     if (cameraMode !== 'cockpit') {
       drawMiniAttitude(telemetry.pitchRad, telemetry.rollRad);
-      drawMiniRadar(telemetry);
+      drawMiniRadar(telemetry, enemiesList);
     }
 
-    // Flight alerts
     if (transientTimer > 0) {
       transientTimer -= dt;
       if (transientTimer <= 0) transientAlert = null;
@@ -356,9 +403,9 @@ export function createHud({ onSelectMission, onLaunch, onRetry, onNextMission, o
     const alerts = [];
     if (gameState === 'flying') {
       if (telemetry.stalling) alerts.push({ text: 'STALL WARNING — LOWER NOSE / ADD THROTTLE', tone: 'warn' });
-      if (telemetry.overspeed) alerts.push({ text: 'OVERSPEED — REDUCE THROTTLE', tone: 'warn' });
+      if (telemetry.overspeed) alerts.push({ text: 'OVERSPEED — REDUCE THROTTLE / B AIRBRAKE', tone: 'warn' });
       if (telemetry.fuel <= 0.1) alerts.push({ text: 'FUEL EXHAUSTED — GLIDE TO NEAREST RUNWAY', tone: 'warn' });
-      else if (telemetry.fuel < 22) alerts.push({ text: 'LOW FUEL — CRUISE AT 65% THROTTLE', tone: 'gold' });
+      else if (telemetry.fuel < 22) alerts.push({ text: 'LOW FUEL — TOUCH-AND-GO AT ANY STRIP TO REFUEL', tone: 'gold' });
     }
     if (transientAlert) alerts.push(transientAlert);
 

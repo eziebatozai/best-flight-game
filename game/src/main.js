@@ -1,22 +1,28 @@
 import * as THREE from '../vendor/three.min.js';
-import { createWorld } from './world.js';
-import { createPlane } from './plane.js';
+import { createCombatDirector } from './combat.js';
+import { createEnemyManager } from './enemies.js';
+import { createWeaponsSystem } from './weapons.js';
+import { createEffectsEngine } from './effects.js';
+import { createCombatHud } from './combat-hud.js';
+import { applyCombatShot } from './shots.js';
 import { createFlightModel } from './flight.js';
 import { createMissionManager } from './missions.js';
 import { createCameraController } from './camera.js';
-import { createHud } from './hud.js';
 import { createInputController } from './input.js';
 import { createAudioEngine } from './audio.js';
+import { createHud } from './hud.js';
+import { createPlane } from './plane.js';
+import { createWorld } from './world.js';
 
 const canvas = document.getElementById('viewport');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
+renderer.toneMappingExposure = 1.1;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.15, 16000);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.15, 16000);
 
 const world = createWorld(scene);
 const plane = createPlane();
@@ -28,15 +34,26 @@ const missionMgr = createMissionManager(scene);
 const camCtrl = createCameraController(camera);
 const audio = createAudioEngine();
 
+const effects = createEffectsEngine(scene);
+const enemies = createEnemyManager(scene, world, effects);
+const weapons = createWeaponsSystem(scene, world, effects);
+const combat = createCombatDirector(enemies, weapons, effects, audio);
+const combatHud = createCombatHud();
+
 let selectedMissionIdx = 0;
 let gameState = 'title'; // 'title' | 'flying' | 'landed' | 'crashed'
 let lastMissionInfo = null;
 let shotMode = null;
 
+function setResultBodyClass(open) {
+  document.body.classList.toggle('result-open', open);
+}
+
 function selectMission(idx) {
   selectedMissionIdx = ((idx % missionMgr.missions.length) + missionMgr.missions.length) % missionMgr.missions.length;
   const mission = missionMgr.loadMission(selectedMissionIdx);
   flight.resetOnRunway(mission.startStrip, mission.startFuel, mission.windSpeedKt, mission.windDirDeg);
+  combat.resetForMission(selectedMissionIdx);
   hud.renderMissionCards(missionMgr.missions, selectedMissionIdx);
   camCtrl.snap();
 }
@@ -45,17 +62,20 @@ function launchMission() {
   audio.ensureStarted();
   const mission = missionMgr.loadMission(selectedMissionIdx);
   flight.resetOnRunway(mission.startStrip, mission.startFuel, mission.windSpeedKt, mission.windDirDeg);
-  flight.state.throttle = 0.78;
+  combat.resetForMission(selectedMissionIdx);
+  flight.state.throttle = 0.8;
   gameState = 'flying';
   hud.showTitle(false);
   hud.hideResult();
-  hud.pushAlert(`CLEARED FOR TAKEOFF — ${mission.name.toUpperCase()}`, 'info', 2.8);
+  setResultBodyClass(false);
+  hud.pushAlert(`SCRAMBLE — ${mission.name.toUpperCase()} (${mission.threatSummary.toUpperCase()})`, 'info', 3.0);
   camCtrl.snap();
 }
 
 function returnToMenu() {
   gameState = 'title';
   hud.hideResult();
+  setResultBodyClass(false);
   hud.showTitle(true);
   selectMission(selectedMissionIdx);
 }
@@ -76,13 +96,29 @@ const hud = createHud({
 const input = createInputController(canvas, {
   onToggleCamera: () => {
     const next = camCtrl.toggleMode();
-    hud.pushAlert(next === 'cockpit' ? 'COCKPIT VIEW' : 'CHASE VIEW', 'info', 1.4);
+    hud.pushAlert(next === 'cockpit' ? 'COCKPIT VIEW — REFLEX GUNSIGHT ACTIVE' : 'CHASE VIEW', 'info', 1.5);
   },
   onCycleFlaps: () => {
     flight.state.flaps = (flight.state.flaps + 1) % 3;
     audio.playFlaps();
     const deg = flight.state.flaps === 0 ? 0 : flight.state.flaps === 1 ? 15 : 30;
     hud.pushAlert(`FLAPS ${deg}°`, 'info', 1.3);
+  },
+  onFireMissile: () => {
+    if (gameState === 'flying') {
+      combat.triggerMissile(plane, flight.state);
+    }
+  },
+  onCycleTarget: () => {
+    if (gameState === 'flying') {
+      const target = combat.cycleTarget();
+      if (target) hud.pushAlert(`TARGET LOCKED: ${target.name.toUpperCase()}`, 'info', 1.4);
+    }
+  },
+  onDeployFlares: () => {
+    if (gameState === 'flying') {
+      combat.triggerFlares(flight.state);
+    }
   },
   onToggleMute: () => {
     const muted = audio.toggleMute();
@@ -104,129 +140,24 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  combatHud.resize();
 });
 
-/**
- * Deterministic preview states for ?shot=start|flight|cockpit|landing screenshots.
- */
-function applyShotMode(shot) {
-  shotMode = shot;
-  if (shot === 'start') {
-    selectMission(0);
-    gameState = 'title';
-    camCtrl.setMode('chase');
-    hud.showTitle(true);
-    hud.hideResult();
-    flight.state.throttle = 0.35;
-    flight.state.rpm = 0.42;
-    return;
-  }
-
-  if (shot === 'flight') {
-    missionMgr.loadMission(0);
-    missionMgr.setProgressForShot(3, 46);
-    gameState = 'flying';
-    camCtrl.setMode('chase');
-    hud.showTitle(false);
-    hud.hideResult();
-    // Chase view flying gracefully toward glowing Ring 4 over turquoise islands with Gunung Api in background
-    flight.setPose({
-      x: -482,
-      y: 94,
-      z: 126,
-      headingDeg: 40,
-      pitchDeg: -3,
-      rollDeg: -10,
-      speedKt: 84,
-      throttle: 0.74,
-      flaps: 0,
-      fuel: 81,
-      damage: 0,
-      onGround: false,
-    });
-    return;
-  }
-
-  if (shot === 'cockpit') {
-    missionMgr.loadMission(0);
-    missionMgr.setProgressForShot(5, 71);
-    gameState = 'flying';
-    camCtrl.setMode('cockpit');
-    hud.showTitle(false);
-    hud.hideResult();
-    // Seated cockpit view on final approach to Pulau Hijau runway with lit gauges & approach ring ahead
-    flight.setPose({
-      x: -342,
-      y: 50,
-      z: -38,
-      headingDeg: 40,
-      pitchDeg: -5,
-      rollDeg: 1.5,
-      speedKt: 58,
-      throttle: 0.36,
-      flaps: 2,
-      fuel: 72,
-      damage: 0,
-      onGround: false,
-    });
-    return;
-  }
-
-  if (shot === 'landing') {
-    missionMgr.loadMission(0);
-    missionMgr.setProgressForShot(6, 88);
-    gameState = 'landed';
-    camCtrl.setMode('chase');
-    hud.showTitle(false);
-    // Merpati D-7 parked victoriously on Pulau Hijau destination runway after a butter landing
-    flight.setPose({
-      x: -115,
-      y: 19.32,
-      z: -310,
-      headingDeg: 40,
-      pitchDeg: 0,
-      rollDeg: 0,
-      speedKt: 0,
-      throttle: 0.14,
-      flaps: 2,
-      fuel: 68,
-      damage: 0,
-      onGround: true,
-      onRunway: 'hijau',
-    });
-    flight.state.landingRecord = {
-      touchedDown: true,
-      touchdownVsi: 1.1,
-      touchdownRollDeg: 2.1,
-      bounceCount: 0,
-      grade: 'BUTTER',
-    };
-    plane.spawnSmoke(new THREE.Vector3(-148, 18.6, -270), 6, false);
-    const score = missionMgr.calculateScore(flight.state);
-    hud.showLandingResult(score);
-  }
-}
-
-// Initialize game or deterministic shot pose
-const params = new URLSearchParams(window.location.search);
-const requestedShot = params.get('shot');
-if (requestedShot && ['start', 'flight', 'cockpit', 'landing'].includes(requestedShot)) {
-  applyShotMode(requestedShot);
-} else {
-  selectMission(0);
-  hud.showTitle(true);
-}
-
-// Handle physics & mission events
 function processEvents(missionInfo) {
   if (missionInfo.event && missionInfo.event.type === 'ring_hit') {
     audio.playRingChime(missionInfo.event.bullseye);
     if (missionInfo.event.allRingsDone) {
-      hud.pushAlert(`ALL RINGS CLEARED! LAND AT ${missionInfo.destName.toUpperCase()}`, 'gold', 3.4);
+      hud.pushAlert(`ALL RINGS CLEARED! CLEAR RAIDERS & LAND AT ${missionInfo.destName.toUpperCase()}`, 'gold', 3.4);
     } else if (missionInfo.event.bullseye) {
       hud.pushAlert(`BULLSEYE RING ${missionInfo.event.ringsHit}/${missionInfo.event.totalRings} (+325)`, 'gold', 1.8);
     } else {
       hud.pushAlert(`RING ${missionInfo.event.ringsHit}/${missionInfo.event.totalRings} (+250)`, 'info', 1.6);
+    }
+  }
+
+  for (const cev of combat.state.events) {
+    if (cev.type === 'alert') {
+      hud.pushAlert(cev.text, cev.tone, cev.duration);
     }
   }
 
@@ -235,30 +166,64 @@ function processEvents(missionInfo) {
       audio.playTouchdown();
       plane.spawnSmoke(ev.pos, 6, false);
       hud.pushAlert(
-        `${ev.grade} TOUCHDOWN (${ev.sinkMps.toFixed(1)} m/s) — HOLD SPACE TO BRAKE`,
+        `${ev.grade} TOUCHDOWN (${ev.sinkMps.toFixed(1)} m/s) — HOLD B TO BRAKE`,
         ev.grade === 'BUTTER' || ev.grade === 'SMOOTH' ? 'gold' : 'info',
         3.0
       );
+    } else if (ev.type === 'resupply') {
+      combat.handleTouchAndGoResupply(ev.stripId, ev.stripName, flight);
+    } else if (ev.type === 'hostiles_remain') {
+      hud.pushAlert(`HOSTILES STILL AIRBORNE (${combat.state.hostilesRemaining}) — TAKE OFF TO ENGAGE!`, 'warn', 3.0);
     } else if (ev.type === 'bounce') {
       audio.playBounce();
       plane.spawnSmoke(ev.pos, 5, false);
       hud.pushAlert(`HARD BOUNCE! -${ev.dmg}% HULL — FLARE GENTLY`, 'warn', 2.4);
     } else if (ev.type === 'crash') {
       audio.playCrash();
+      effects.spawnExplosion(flight.state.position, 1.5, false);
       plane.spawnSmoke(flight.state.position, 10, true);
       gameState = 'crashed';
-      hud.showCrashResult(ev.reason, missionInfo, flight.state);
+      setResultBodyClass(true);
+      hud.showCrashResult(ev.reason, missionInfo, flight.state, combat.state);
     } else if (ev.type === 'mission_landed') {
       audio.playMissionComplete();
       gameState = 'landed';
-      const score = missionMgr.calculateScore(flight.state);
+      setResultBodyClass(true);
+      const score = missionMgr.calculateScore(flight.state, combat.getCombatScore(flight.state));
       hud.showLandingResult(score);
     }
   }
 }
 
 let lastNow = performance.now();
-let elapsed = shotMode ? 6.4 : 0;
+let elapsed = 0;
+
+// Initialize deterministic screenshot scene or normal Mission Select title screen
+const params = new URLSearchParams(window.location.search);
+const requestedShot = params.get('shot');
+if (requestedShot && ['cover', 'gameplay', 'cockpit', 'debrief'].includes(requestedShot)) {
+  shotMode = requestedShot;
+  const staged = applyCombatShot(requestedShot, {
+    missionMgr,
+    flight,
+    combat,
+    enemies,
+    weapons,
+    effects,
+    camCtrl,
+    hud,
+    plane,
+  });
+  if (staged) {
+    gameState = staged.gameState;
+    elapsed = staged.elapsed;
+    setResultBodyClass(gameState === 'landed' || gameState === 'crashed');
+  }
+} else {
+  selectMission(0);
+  hud.showTitle(true);
+  setResultBodyClass(false);
+}
 
 function tick(now) {
   requestAnimationFrame(tick);
@@ -266,12 +231,13 @@ function tick(now) {
   lastNow = now;
   const dt = Math.min(0.05, Math.max(0.001, rawDt));
 
+  let ctrl = { pitch: 0, roll: 0, yaw: 0, throttleDelta: 0, brake: false, fireCannon: false };
   if (!shotMode) {
     elapsed += dt;
-    const ctrl = input.sample(dt);
+    ctrl = input.sample(dt);
     if (gameState === 'flying') {
       const destId = missionMgr.missions[selectedMissionIdx].destStrip;
-      flight.step(dt, ctrl, destId);
+      flight.step(dt, ctrl, destId, combat.isCombatComplete());
     }
   }
 
@@ -279,59 +245,133 @@ function tick(now) {
   lastMissionInfo = missionInfo;
 
   if (!shotMode && gameState === 'flying') {
+    combat.update(dt, elapsed, flight, plane, missionInfo, ctrl);
+    effects.update(dt);
     processEvents(missionInfo);
+  } else if (!shotMode) {
+    effects.update(dt);
   }
 
+  const livingEnemies = enemies.getEnemies();
+  const activeBoss = enemies.getActiveBoss();
   const telemetry = flight.getTelemetry(missionInfo);
+  const shakeOffset = shotMode ? { x: 0, y: 0, z: 0, roll: 0 } : effects.getShakeOffset(elapsed);
+  const lockedBearing = combat.getLockedBearingDeg(flight.state.position);
+  document.body.classList.toggle('cockpit-view', camCtrl.getMode() === 'cockpit');
+
   world.update(elapsed, shotMode ? 0 : dt, flight.state.position, flight.state.windDirRad);
-  plane.updateVisuals(shotMode ? 0.016 : dt, elapsed, flight.state, telemetry, camCtrl.getMode() === 'cockpit');
-  camCtrl.update(shotMode ? 0.016 : dt, elapsed, gameState, flight.state, input.mouseLook, Boolean(shotMode));
-  hud.update(shotMode ? 0 : dt, telemetry, missionInfo, camCtrl.getMode(), gameState);
+  plane.updateVisuals(
+    shotMode ? 0.016 : dt,
+    elapsed,
+    flight.state,
+    telemetry,
+    camCtrl.getMode() === 'cockpit',
+    combat.state,
+    weapons.state,
+    livingEnemies
+  );
+  camCtrl.update(shotMode ? 0.016 : dt, elapsed, gameState, flight.state, input.mouseLook, shakeOffset, Boolean(shotMode));
+  hud.update(shotMode ? 0 : dt, telemetry, missionInfo, camCtrl.getMode(), gameState, combat.state, livingEnemies, lockedBearing);
+  combatHud.update(
+    elapsed,
+    camera,
+    flight.state,
+    livingEnemies,
+    activeBoss,
+    combat.state,
+    weapons.state,
+    camCtrl.getMode(),
+    gameState,
+    input.mouseAim
+  );
   audio.update(telemetry, gameState, elapsed);
 
   renderer.render(scene, camera);
 }
 
-// Render initial frame immediately and start animation loop
+// Render initial frame immediately
 (function renderInitialFrame() {
+  const livingEnemies = enemies.getEnemies();
+  const activeBoss = enemies.getActiveBoss();
   const missionInfo = missionMgr.update(0, elapsed, flight.state.position, false);
   lastMissionInfo = missionInfo;
   const telemetry = flight.getTelemetry(missionInfo);
+  const lockedBearing = combat.getLockedBearingDeg(flight.state.position);
+  document.body.classList.toggle('cockpit-view', camCtrl.getMode() === 'cockpit');
   world.update(elapsed, 0, flight.state.position, flight.state.windDirRad);
-  plane.updateVisuals(0.016, elapsed, flight.state, telemetry, camCtrl.getMode() === 'cockpit');
-  camCtrl.update(0.016, elapsed, gameState, flight.state, input.mouseLook, true);
-  hud.update(0, telemetry, missionInfo, camCtrl.getMode(), gameState);
+  plane.updateVisuals(0.016, elapsed, flight.state, telemetry, camCtrl.getMode() === 'cockpit', combat.state, weapons.state, livingEnemies);
+  camCtrl.update(0.016, elapsed, gameState, flight.state, input.mouseLook, { x: 0, y: 0, z: 0, roll: 0 }, true);
+  hud.update(0, telemetry, missionInfo, camCtrl.getMode(), gameState, combat.state, livingEnemies, lockedBearing);
+  combatHud.update(elapsed, camera, flight.state, livingEnemies, activeBoss, combat.state, weapons.state, camCtrl.getMode(), gameState, input.mouseAim);
   renderer.render(scene, camera);
 })();
 
-// Read-only inspection & testing handle for automated verification
+// Inspection & deterministic simulation stepping handle for automated verification
 window.__MERPATI__ = {
-  getState: () => ({
-    gameState,
-    cameraMode: camCtrl.getMode(),
-    mission: lastMissionInfo ? lastMissionInfo.mission.id : null,
-    ringsHit: lastMissionInfo ? lastMissionInfo.ringsHit : 0,
-    totalRings: lastMissionInfo ? lastMissionInfo.totalRings : 0,
-    position: flight.state.position.toArray(),
-    airspeedKt: Math.round(flight.state.airspeed * 1.94384),
-    altitudeFt: Math.round(flight.state.position.y * 3.28084),
-    headingDeg: Math.round(flight.state.headingDeg),
-    throttle: Number(flight.state.throttle.toFixed(2)),
-    fuel: Math.round(flight.state.fuel),
-    damage: Math.round(flight.state.damage),
-    onGround: flight.state.onGround,
-    onRunway: flight.state.onRunway,
-    crashed: flight.state.crashed,
-  }),
+  getState: () => {
+    const living = enemies.getEnemies();
+    const boss = enemies.getActiveBoss();
+    return {
+      gameState,
+      cameraMode: camCtrl.getMode(),
+      mission: lastMissionInfo ? lastMissionInfo.mission.id : null,
+      ringsHit: lastMissionInfo ? lastMissionInfo.ringsHit : 0,
+      totalRings: lastMissionInfo ? lastMissionInfo.totalRings : 0,
+      position: flight.state.position.toArray(),
+      airspeedKt: Math.round(flight.state.airspeed * 1.94384),
+      altitudeFt: Math.round(flight.state.position.y * 3.28084),
+      headingDeg: Math.round(flight.state.headingDeg),
+      throttle: Number(flight.state.throttle.toFixed(2)),
+      wepActive: flight.state.wepActive,
+      fuel: Math.round(flight.state.fuel),
+      damage: Math.round(flight.state.damage),
+      onGround: flight.state.onGround,
+      onRunway: flight.state.onRunway,
+      crashed: flight.state.crashed,
+      ammo: weapons.state.ammo,
+      heat: Number(weapons.state.heat.toFixed(2)),
+      missiles: weapons.state.missiles,
+      flareCooldown: Number(weapons.state.flareCooldown.toFixed(2)),
+      kills: combat.state.kills,
+      hostilesRemaining: combat.state.hostilesRemaining,
+      livingEnemyCount: living.length,
+      lockedTarget: combat.state.lockedEnemy ? combat.state.lockedEnemy.shortName : null,
+      lockProgress: Number(combat.state.lockProgress.toFixed(2)),
+      boss: boss ? { name: boss.shortName, hp: boss.hp, maxHp: boss.maxHp, phase: boss.bossPhase } : null,
+    };
+  },
+  selectMission: (idx) => selectMission(idx),
   launch: () => launchMission(),
+  setCameraMode: (mode) => camCtrl.setMode(mode),
+  fireMissile: () => combat.triggerMissile(plane, flight.state),
+  deployFlares: () => combat.triggerFlares(flight.state),
+  cycleTarget: () => combat.cycleTarget(),
+  damageLockedEnemy: (dmg) => {
+    const target = combat.state.lockedEnemy || enemies.getEnemies()[0];
+    if (!target) return null;
+    const res = enemies.damageEnemy(target, dmg);
+    if (res.killed) {
+      combat.state.kills += 1;
+      combat.state.hostilesRemaining = Math.max(0, combat.state.hostilesRemaining - 1);
+    }
+    return res;
+  },
+  applyPlayerDamage: (dmg, label) => {
+    flight.applyCombatDamage(dmg, label || 'Test flak');
+    if (lastMissionInfo) processEvents(lastMissionInfo);
+    return window.__MERPATI__.getState();
+  },
   stepSimulation: (seconds, ctrlOverride) => {
     const destId = missionMgr.missions[selectedMissionIdx].destStrip;
     const steps = Math.max(1, Math.round(seconds / 0.02));
+    const ctrl = Object.assign({ pitch: 0, roll: 0, yaw: 0, throttleDelta: 0, brake: false, fireCannon: false }, ctrlOverride || {});
     for (let i = 0; i < steps; i++) {
       elapsed += 0.02;
-      flight.step(0.02, ctrlOverride || { pitch: 0, roll: 0, yaw: 0, throttleDelta: 0, brake: false }, destId);
+      flight.step(0.02, ctrl, destId, combat.isCombatComplete());
       const mi = missionMgr.update(0.02, elapsed, flight.state.position, gameState === 'flying');
       lastMissionInfo = mi;
+      combat.update(0.02, elapsed, flight, plane, mi, ctrl);
+      effects.update(0.02);
       processEvents(mi);
       if (gameState !== 'flying') break;
     }

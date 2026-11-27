@@ -7,7 +7,10 @@ const M_TO_FT = 3.28084;
 const MPS_TO_FPM = 196.85;
 
 /**
- * Create the 3D STOL bush-plane flight dynamics simulation.
+ * Combat-tuned 3D STOL flight dynamics for Merpati D-7B Stormbird.
+ * Combines authentic bush-plane takeoffs, landings, crosswinds, and volcanic thermals
+ * with wide dogfight pitch/roll agility, high-G turn energy bleed, War Emergency Power
+ * overdrive, hostile hit jolts, and friendly airstrip touch-and-go resupply detection.
  */
 export function createFlightModel(world) {
   const position = new THREE.Vector3();
@@ -19,8 +22,9 @@ export function createFlightModel(world) {
     velocity,
     quaternion,
     throttle: 0,
+    wepActive: false,
     rpm: 0.18,
-    flaps: 0, // 0=0deg, 1=15deg, 2=30deg
+    flaps: 0,
     brakes: 0,
     fuel: 100,
     damage: 0,
@@ -51,7 +55,6 @@ export function createFlightModel(world) {
     events: [],
   };
 
-  // Reusable scratch vectors to avoid GC churn
   const fwd = new THREE.Vector3();
   const right = new THREE.Vector3();
   const up = new THREE.Vector3();
@@ -64,7 +67,6 @@ export function createFlightModel(world) {
     euler.setFromQuaternion(quaternion, 'YXZ');
     state.pitchRad = euler.x;
     state.rollRad = euler.z;
-    // Heading 0 = North (-Z), 90 = East (+X)
     fwd.set(0, 0, -1).applyQuaternion(quaternion);
     let hdg = (Math.atan2(fwd.x, -fwd.z) * 180) / Math.PI;
     if (hdg < 0) hdg += 360;
@@ -72,9 +74,6 @@ export function createFlightModel(world) {
     state.headingRad = (hdg * Math.PI) / 180;
   }
 
-  /**
-   * Place the aircraft cleanly at the departure end of a runway.
-   */
   function resetOnRunway(stripId, startFuel = 100, windSpeedKt = 4, windDirDeg = 70) {
     const strip = world.getAirstripById(stripId);
     const { rad, fwdX, fwdZ } = world.getRunwayBasis(strip);
@@ -89,8 +88,9 @@ export function createFlightModel(world) {
     quaternion.setFromEuler(new THREE.Euler(0, -rad, 0, 'YXZ'));
 
     state.throttle = 0.22;
+    state.wepActive = false;
     state.rpm = 0.25;
-    state.flaps = 1; // 15 deg takeoff flaps preset
+    state.flaps = 1;
     state.brakes = 0;
     state.fuel = startFuel;
     state.damage = 0;
@@ -117,14 +117,24 @@ export function createFlightModel(world) {
     state.windDirRad = (windDirDeg * Math.PI) / 180;
     const windMps = windSpeedKt / MPS_TO_KT;
     state.windVec.set(Math.sin(state.windDirRad) * windMps, 0, -Math.cos(state.windDirRad) * windMps);
-
     syncAngles();
   }
 
-  /**
-   * Place the aircraft directly in flight for deterministic screenshot/preview poses.
-   */
-  function setPose({ x, y, z, headingDeg, pitchDeg = 0, rollDeg = 0, speedKt = 80, throttle = 0.72, flaps = 0, fuel = 82, damage = 0, onGround = false, onRunway = null }) {
+  function setPose({
+    x,
+    y,
+    z,
+    headingDeg,
+    pitchDeg = 0,
+    rollDeg = 0,
+    speedKt = 88,
+    throttle = 0.78,
+    flaps = 0,
+    fuel = 80,
+    damage = 0,
+    onGround = false,
+    onRunway = null,
+  }) {
     position.set(x, y, z);
     const hRad = (headingDeg * Math.PI) / 180;
     const pRad = (pitchDeg * Math.PI) / 180;
@@ -135,6 +145,7 @@ export function createFlightModel(world) {
     velocity.copy(fwd).multiplyScalar(speedKt / MPS_TO_KT);
 
     state.throttle = throttle;
+    state.wepActive = throttle > 0.9;
     state.rpm = Math.max(0.22, throttle);
     state.flaps = flaps;
     state.fuel = fuel;
@@ -151,6 +162,27 @@ export function createFlightModel(world) {
     syncAngles();
   }
 
+  /**
+   * Apply hostile gunfire or flak damage plus subtle rotational impact jolt.
+   */
+  function applyCombatDamage(dmg, sourceLabel = 'Enemy fire') {
+    if (state.crashed) return;
+    state.damage = Math.min(100, state.damage + dmg);
+
+    // Subtle rotational jolt on hit
+    const jolt = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler((Math.random() - 0.5) * 0.04, (Math.random() - 0.5) * 0.03, (Math.random() - 0.5) * 0.08)
+    );
+    quaternion.multiply(jolt).normalize();
+    syncAngles();
+
+    if (state.damage >= 100) {
+      state.crashed = true;
+      state.crashReason = `Shot down by ${sourceLabel} — use flares (F) and break turns to evade.`;
+      state.events.push({ type: 'crash', reason: state.crashReason, combatLoss: true });
+    }
+  }
+
   function classifyLanding(sinkMps, rollDeg, bounceCount) {
     if (sinkMps < 1.5 && rollDeg < 7 && bounceCount === 0) return 'BUTTER';
     if (sinkMps < 2.6 && rollDeg < 12 && bounceCount <= 1) return 'SMOOTH';
@@ -158,109 +190,97 @@ export function createFlightModel(world) {
     return 'HARD';
   }
 
-  /**
-   * Step flight physics forward by dt seconds.
-   */
-  function step(dt, input, destRunwayId) {
+  function step(dt, input, destRunwayId, combatComplete = true) {
     state.events.length = 0;
     if (state.crashed) {
       velocity.multiplyScalar(Math.max(0, 1 - dt * 3.5));
       return;
     }
 
-    // Throttle control
     if (input.throttleDelta !== 0) {
-      state.throttle = Math.max(0, Math.min(1, state.throttle + input.throttleDelta * dt * 0.65));
+      state.throttle = Math.max(0, Math.min(1, state.throttle + input.throttleDelta * dt * 0.68));
     }
     state.brakes = input.brake ? 1 : 0;
 
-    // Fuel consumption (nonlinear curve rewards throttle discipline!)
+    // War Emergency Power engages above 90% throttle for combat pursuit at higher fuel burn
     const fuelAvailable = state.fuel > 0.01;
-    const targetRpm = fuelAvailable ? 0.14 + state.throttle * 0.86 : 0.04;
-    state.rpm += (targetRpm - state.rpm) * Math.min(1, dt * 4.5);
+    state.wepActive = fuelAvailable && state.throttle > 0.9;
+    const targetRpm = fuelAvailable ? 0.14 + state.throttle * (state.wepActive ? 0.94 : 0.86) : 0.04;
+    state.rpm += (targetRpm - state.rpm) * Math.min(1, dt * 5.0);
 
     if (fuelAvailable && (!state.onGround || state.throttle > 0.25)) {
-      const burnRate = 0.12 + Math.pow(state.throttle, 1.85) * 0.88;
+      const wepBurn = state.wepActive ? 0.62 : 0;
+      const burnRate = 0.11 + Math.pow(state.throttle, 1.85) * 0.84 + wepBurn;
       state.fuel = Math.max(0, state.fuel - burnRate * dt);
       if (state.fuel <= 0.01) {
         state.events.push({ type: 'fuel_empty' });
       }
     }
 
-    // Smooth control surface deflection
-    const smooth = Math.min(1, dt * 9.5);
+    // Crisp combat-tuned control surface response
+    const smooth = Math.min(1, dt * 11.5);
     state.controlSurfaces.pitch += (input.pitch - state.controlSurfaces.pitch) * smooth;
     state.controlSurfaces.roll += (input.roll - state.controlSurfaces.roll) * smooth;
     state.controlSurfaces.yaw += (input.yaw - state.controlSurfaces.yaw) * smooth;
 
-    // Basis vectors
     fwd.set(0, 0, -1).applyQuaternion(quaternion);
     right.set(1, 0, 0).applyQuaternion(quaternion);
     up.set(0, 1, 0).applyQuaternion(quaternion);
 
-    // Relative airflow (aircraft velocity minus gentle ambient wind)
     relVel.copy(velocity).sub(state.windVec);
     const speed = relVel.length();
     const forwardSpeed = Math.max(0, relVel.dot(fwd));
     state.airspeed = speed;
     const speedKt = speed * MPS_TO_KT;
 
-    // Stall & overspeed checks
     const stallKt = state.flaps === 2 ? 25 : state.flaps === 1 ? 29 : 34;
     state.stalling = !state.onGround && speedKt < stallKt;
-    state.overspeed = speedKt > 130;
+    state.overspeed = speedKt > 148;
 
-    // Control authority scales smoothly with airflow + prop slipstream so controls ALWAYS respond
-    const aeroAuthority = Math.min(1.2, 0.34 + (forwardSpeed / 36) * 0.86 + state.rpm * 0.18);
+    const aeroAuthority = Math.min(1.35, 0.42 + (forwardSpeed / 36) * 0.92 + state.rpm * 0.18);
 
     if (state.onGround) {
-      // Ground steering & takeoff rotation
-      const steerRate = state.controlSurfaces.yaw * 1.15 - state.controlSurfaces.roll * 0.45;
+      const steerRate = state.controlSurfaces.yaw * 1.2 - state.controlSurfaces.roll * 0.45;
       const yawStep = steerRate * Math.min(1, 0.35 + speed / 18) * dt;
-      const canRotate = forwardSpeed > 14;
-      const pitchStep = canRotate ? Math.max(0, state.controlSurfaces.pitch) * 0.82 * dt : 0;
+      const canRotate = forwardSpeed > 13.5;
+      const pitchStep = canRotate ? Math.max(0, state.controlSurfaces.pitch) * 0.92 * dt : 0;
 
       euler.setFromQuaternion(quaternion, 'YXZ');
       euler.y += yawStep;
-      euler.x = Math.max(-0.04, Math.min(0.28, euler.x + pitchStep));
-      // Keep wings level while wheels are planted
+      euler.x = Math.max(-0.04, Math.min(0.32, euler.x + pitchStep));
       euler.z *= Math.max(0, 1 - dt * 8);
       quaternion.setFromEuler(euler);
     } else {
-      // Full 3D flight rotation with coordinated bank-turn feel and utility-plane pitch stability
-      const pitchRate = state.controlSurfaces.pitch * 0.82 * aeroAuthority;
-      const rollRate = -state.controlSurfaces.roll * 1.55 * aeroAuthority;
-      const yawRate = state.controlSurfaces.yaw * 0.78 * aeroAuthority;
+      // Wide combat flight envelope for steep dives, climbs, and aggressive dogfight break turns
+      const pitchRate = state.controlSurfaces.pitch * 1.18 * aeroAuthority;
+      const rollRate = -state.controlSurfaces.roll * 2.15 * aeroAuthority;
+      const yawRate = state.controlSurfaces.yaw * 0.88 * aeroAuthority;
 
-      // Subtle stall nose-drop & buffet when below stall speed
-      const stallDrop = state.stalling ? -0.38 * dt : 0;
+      const stallDrop = state.stalling ? -0.35 * dt : 0;
       const buffetRoll = state.stalling ? Math.sin(performance.now() * 0.025) * 0.014 : 0;
 
-      // Aerodynamic pitch envelope damping (prevents unintentional loops in a STOL bush plane)
       let pitchStep = pitchRate * dt + stallDrop;
-      if (state.pitchRad > 0.48 && pitchStep > 0) pitchStep *= Math.max(0, 1 - (state.pitchRad - 0.48) * 4.5);
-      if (state.pitchRad < -0.62 && pitchStep < 0) pitchStep *= Math.max(0, 1 - (-0.62 - state.pitchRad) * 4.5);
+      if (state.pitchRad > 1.05 && pitchStep > 0) pitchStep *= Math.max(0, 1 - (state.pitchRad - 1.05) * 3.2);
+      if (state.pitchRad < -1.08 && pitchStep < 0) pitchStep *= Math.max(0, 1 - (-1.08 - state.pitchRad) * 3.2);
 
-      // Gentle dihedral wing-leveling stability when pilot releases roll input
+      // Very light wing-leveling assist only when pilot centers stick
       let rollStep = rollRate * dt + buffetRoll;
-      if (Math.abs(state.controlSurfaces.roll) < 0.05) {
-        rollStep += -state.rollRad * 0.65 * dt;
+      if (Math.abs(state.controlSurfaces.roll) < 0.04 && Math.abs(state.rollRad) < 0.45) {
+        rollStep += -state.rollRad * 0.32 * dt;
       }
 
       eulerDelta.set(pitchStep, yawRate * dt, rollStep, 'YXZ');
       qDelta.setFromEuler(eulerDelta);
       quaternion.multiply(qDelta).normalize();
 
-      // Gentle coordinated turn: banking naturally induces a smooth heading turn
       syncAngles();
-      const bankTurn = Math.sin(state.rollRad) * 0.52 * Math.min(1, forwardSpeed / 28) * dt;
+      const bankTurn = Math.sin(state.rollRad) * 0.68 * Math.min(1.2, forwardSpeed / 28) * dt;
       if (Math.abs(bankTurn) > 0.00001) {
         qDelta.setFromAxisAngle(new THREE.Vector3(0, 1, 0), bankTurn);
         quaternion.premultiply(qDelta).normalize();
       }
     }
 
-    // Recompute basis after rotation
     fwd.set(0, 0, -1).applyQuaternion(quaternion);
     right.set(1, 0, 0).applyQuaternion(quaternion);
     up.set(0, 1, 0).applyQuaternion(quaternion);
@@ -269,8 +289,8 @@ export function createFlightModel(world) {
     // ===== FORCES =====
     const acc = new THREE.Vector3(0, -GRAVITY, 0);
 
-    // 1. Engine Thrust (STOL bush plane: crisp climb & takeoff power)
-    const maxThrustAcc = 14.5;
+    // 1. Engine Thrust + War Emergency Power surge
+    const maxThrustAcc = state.wepActive ? 19.6 : 15.6;
     const thrust = fuelAvailable ? state.rpm * maxThrustAcc : 0;
     acc.addScaledVector(fwd, thrust);
 
@@ -278,46 +298,42 @@ export function createFlightModel(world) {
     const flapLiftBonus = state.flaps === 2 ? 0.36 : state.flaps === 1 ? 0.18 : 0;
     const flapDragBonus = state.flaps === 2 ? 0.0032 : state.flaps === 1 ? 0.001 : 0;
 
-    // Angle of attack approximation from nose pitch relative to flight path
     const velUp = relVel.dot(up);
     const aoa = forwardSpeed > 3 ? Math.atan2(-velUp, forwardSpeed) : 0;
-    const clampedAoa = Math.max(-0.32, Math.min(0.36, aoa));
+    const clampedAoa = Math.max(-0.36, Math.min(0.4, aoa));
 
-    // Stall lift loss when airspeed below stall threshold
-    const stallFactor = state.stalling ? Math.max(0.4, speedKt / stallKt) : 1.0;
-    const liftCoeff = (0.31 + flapLiftBonus + clampedAoa * 2.5) * stallFactor;
-    const liftAcc = Math.min(24, 0.0155 * forwardSpeed * forwardSpeed * liftCoeff);
+    const stallFactor = state.stalling ? Math.max(0.42, speedKt / stallKt) : 1.0;
+    const liftCoeff = (0.31 + flapLiftBonus + clampedAoa * 2.55) * stallFactor;
+    const liftAcc = Math.min(28, 0.0155 * forwardSpeed * forwardSpeed * liftCoeff);
     acc.addScaledVector(up, liftAcc);
 
-    // 3. Parasitic, Flap & Induced Drag
-    const baseDrag = 0.0022 + flapDragBonus + Math.abs(clampedAoa) * 0.0028;
-    const brakeAirDrag = !state.onGround && state.brakes > 0 ? 0.0042 : 0;
+    // 3. Parasitic, Flap, High-G Turn Bleed & Airbrake Drag
+    const highGTurnDrag = !state.onGround
+      ? (Math.abs(Math.sin(state.rollRad)) * 0.0014 + Math.abs(state.controlSurfaces.pitch) * 0.0016)
+      : 0;
+    const baseDrag = 0.002 + flapDragBonus + highGTurnDrag + Math.abs(clampedAoa) * 0.0026;
+    const brakeAirDrag = !state.onGround && state.brakes > 0 ? 0.0052 : 0;
     const dragMag = (baseDrag + brakeAirDrag) * speed * speed;
     if (speed > 0.1) {
       acc.addScaledVector(relVel, -dragMag / speed);
     }
 
-    // 4. Lateral keel stability (keeps flight path tracking aircraft heading cleanly)
+    // 4. Lateral & Vertical Flight Path Tracking
     if (!state.onGround && speed > 5) {
       const sideSlip = relVel.dot(right);
-      acc.addScaledVector(right, -sideSlip * 1.45);
-      // Dampen excessive vertical bobbing so pitch response feels crisp
+      acc.addScaledVector(right, -sideSlip * 1.55);
       const vertSlip = relVel.dot(up);
-      acc.addScaledVector(up, -vertSlip * 0.85);
+      acc.addScaledVector(up, -vertSlip * 0.92);
     }
 
-    // 5. Volcano thermal updraft near Gunung Api caldera
+    // 5. Gunung Api Volcanic Caldera Thermal Updraft
     const distVolcano = Math.hypot(position.x - 760, position.z + 560);
     if (!state.onGround && distVolcano < 340 && position.y > 180) {
-      const thermal = (1 - distVolcano / 340) * 3.4;
-      acc.y += thermal;
+      acc.y += (1 - distVolcano / 340) * 3.6;
     }
 
-    // Integrate velocity & position
     velocity.addScaledVector(acc, dt);
-
-    // Clamp top overspeed slightly for playability
-    const maxMps = 74;
+    const maxMps = state.wepActive ? 84 : 76;
     if (velocity.length() > maxMps) {
       velocity.setLength(maxMps);
     }
@@ -325,16 +341,15 @@ export function createFlightModel(world) {
     position.addScaledVector(velocity, dt);
     state.verticalSpeed = velocity.y;
 
-    // Keep within archipelago bounds (gentle soft nudge far beyond islands)
     const maxBound = 2400;
     if (Math.abs(position.x) > maxBound) position.x = Math.sign(position.x) * maxBound;
     if (Math.abs(position.z) > maxBound) position.z = Math.sign(position.z) * maxBound;
-    if (position.y > 950) {
-      position.y = 950;
+    if (position.y > 980) {
+      position.y = 980;
       if (velocity.y > 0) velocity.y = 0;
     }
 
-    // ===== TERRAIN & RUNWAY CONTACT / LANDING / BOUNCE / CRASH =====
+    // ===== TERRAIN & RUNWAY CONTACT / TOUCH-AND-GO RESUPPLY / LANDING =====
     const ground = world.sampleTerrain(position.x, position.z);
     const groundY = ground.height + GEAR_HEIGHT;
 
@@ -355,30 +370,23 @@ export function createFlightModel(world) {
       const wasAirborne = !state.onGround;
 
       if (wasAirborne) {
-        // Hard crash check
-        if (sinkMps > 7.6 || rollDeg > 36 || pitchDeg < -22 || (!ground.onRunway && speed > 44 && sinkMps > 4.2)) {
+        if (sinkMps > 7.8 || rollDeg > 36 || pitchDeg < -24 || (!ground.onRunway && speed > 44 && sinkMps > 4.2)) {
           position.y = groundY - 0.35;
           velocity.multiplyScalar(0.1);
           state.damage = 100;
           state.crashed = true;
-          if (rollDeg > 36) {
-            state.crashReason = `Wing strike on touchdown (${Math.round(rollDeg)}° bank angle).`;
-          } else if (pitchDeg < -22) {
-            state.crashReason = 'Nose-down impact — flare gently before touching down.';
-          } else if (!ground.onRunway) {
-            state.crashReason = `Off-runway terrain impact (${sinkMps.toFixed(1)} m/s sink rate).`;
-          } else {
-            state.crashReason = `Severe hard landing (${sinkMps.toFixed(1)} m/s sink rate — flare before touchdown).`;
-          }
+          if (rollDeg > 36) state.crashReason = `Wing strike on touchdown (${Math.round(rollDeg)}° bank angle).`;
+          else if (pitchDeg < -24) state.crashReason = 'Nose-down impact — flare gently before touching down.';
+          else if (!ground.onRunway) state.crashReason = `Off-runway terrain impact (${sinkMps.toFixed(1)} m/s sink rate).`;
+          else state.crashReason = `Severe hard landing (${sinkMps.toFixed(1)} m/s sink rate — flare before touchdown).`;
           state.events.push({ type: 'crash', reason: state.crashReason });
           return;
         }
 
-        // Bounce check (medium-hard touchdown!)
-        if (sinkMps > 3.5 || rollDeg > 18) {
+        if (sinkMps > 3.6 || rollDeg > 18) {
           position.y = groundY + 0.15;
           velocity.y = Math.max(2.2, sinkMps * 0.44);
-          const dmg = Math.round(10 + sinkMps * 3.2 + Math.max(0, rollDeg - 12) * 0.6);
+          const dmg = Math.round(10 + sinkMps * 3.0 + Math.max(0, rollDeg - 12) * 0.6);
           state.damage = Math.min(100, state.damage + dmg);
           state.landingRecord.bounceCount += 1;
           state.events.push({ type: 'bounce', sinkMps, dmg, pos: position.clone() });
@@ -392,7 +400,6 @@ export function createFlightModel(world) {
           return;
         }
 
-        // Clean touchdown!
         state.landingRecord.touchedDown = true;
         state.landingRecord.touchdownVsi = sinkMps;
         state.landingRecord.touchdownRollDeg = rollDeg;
@@ -407,18 +414,22 @@ export function createFlightModel(world) {
           onRunway: ground.onRunway,
           pos: position.clone(),
         });
+
+        // Non-destination friendly airstrip touch-and-go field resupply
+        if (ground.onRunway && ground.onRunway !== destRunwayId) {
+          const strip = world.getAirstripById(ground.onRunway);
+          state.events.push({ type: 'resupply', stripId: strip.id, stripName: strip.name });
+        }
       }
 
-      // Ground rolling physics
       position.y = groundY;
       if (velocity.y < 0) velocity.y = 0;
       state.onGround = true;
       state.onRunway = ground.onRunway;
 
-      // Align ground velocity with nose heading (tires grip the tarmac)
       const groundSpeed = Math.hypot(velocity.x, velocity.z);
       const rollingFric = ground.onRunway ? 0.32 : 1.45;
-      const brakeFric = state.brakes > 0 ? 7.8 : state.throttle < 0.08 ? 1.8 : 0;
+      const brakeFric = state.brakes > 0 ? 8.2 : state.throttle < 0.08 ? 1.8 : 0;
       const nextGroundSpeed = Math.max(0, groundSpeed - (rollingFric + brakeFric) * dt);
 
       const hFwdX = Math.sin(state.headingRad);
@@ -426,7 +437,6 @@ export function createFlightModel(world) {
       velocity.x = hFwdX * nextGroundSpeed;
       velocity.z = hFwdZ * nextGroundSpeed;
 
-      // Rough off-runway bumps at high speed
       if (!ground.onRunway && nextGroundSpeed > 18) {
         state.damage = Math.min(100, state.damage + dt * 6.5);
         if (state.damage >= 100) {
@@ -437,16 +447,18 @@ export function createFlightModel(world) {
         }
       }
 
-      // Lift-off transition if lift exceeds gravity during takeoff roll
-      if (liftAcc > GRAVITY * 1.03 && state.pitchRad > 0.04 && forwardSpeed > 17) {
+      if (liftAcc > GRAVITY * 1.03 && state.pitchRad > 0.04 && forwardSpeed > 16.5) {
         state.onGround = false;
-        velocity.y = Math.max(velocity.y, 1.8);
+        velocity.y = Math.max(velocity.y, 2.0);
       }
 
-      // Detect mission completion rollout stop on destination runway
       if (ground.onRunway === destRunwayId && nextGroundSpeed < 3.6 && state.landingRecord.touchedDown) {
-        state.landedMissionRunway = true;
-        state.events.push({ type: 'mission_landed', stripId: destRunwayId });
+        if (combatComplete) {
+          state.landedMissionRunway = true;
+          state.events.push({ type: 'mission_landed', stripId: destRunwayId });
+        } else {
+          state.events.push({ type: 'hostiles_remain', stripId: destRunwayId });
+        }
       }
     } else {
       state.onGround = false;
@@ -465,6 +477,7 @@ export function createFlightModel(world) {
       pitchRad: state.pitchRad,
       rollRad: state.rollRad,
       throttle: state.throttle,
+      wepActive: state.wepActive,
       rpm: state.rpm,
       flapsDeg: state.flaps === 0 ? 0 : state.flaps === 1 ? 15 : 30,
       fuel: state.fuel,
@@ -484,6 +497,7 @@ export function createFlightModel(world) {
     state,
     resetOnRunway,
     setPose,
+    applyCombatDamage,
     step,
     getTelemetry,
   };

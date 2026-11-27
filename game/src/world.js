@@ -1,75 +1,26 @@
 import * as THREE from '../vendor/three.min.js';
 
-/**
- * Airstrip definitions across the Nusantara archipelago.
- * Heading is in degrees clockwise from North (-Z).
- */
 export const AIRSTRIPS = [
-  {
-    id: 'pelabuhan',
-    name: 'Pelabuhan Utama',
-    code: 'RWY 03',
-    x: -640,
-    z: 620,
-    elevation: 14,
-    headingDeg: 28,
-    length: 340,
-    width: 28,
-  },
-  {
-    id: 'hijau',
-    name: 'Pulau Hijau',
-    code: 'RWY 04',
-    x: -140,
-    z: -280,
-    elevation: 18,
-    headingDeg: 40,
-    length: 320,
-    width: 26,
-  },
-  {
-    id: 'timur',
-    name: 'Kampung Timur',
-    code: 'RWY 34',
-    x: 720,
-    z: 120,
-    elevation: 20,
-    headingDeg: 345,
-    length: 310,
-    width: 26,
-  },
-  {
-    id: 'barat',
-    name: 'Teluk Barat',
-    code: 'RWY 15',
-    x: -1020,
-    z: -460,
-    elevation: 24,
-    headingDeg: 152,
-    length: 300,
-    width: 26,
-  },
+  { id: 'pelabuhan', name: 'Pelabuhan Utama', code: 'RWY 03', x: -640, z: 620, elevation: 14, headingDeg: 28, length: 340, width: 28 },
+  { id: 'hijau', name: 'Pulau Hijau', code: 'RWY 04', x: -140, z: -280, elevation: 18, headingDeg: 40, length: 320, width: 26 },
+  { id: 'timur', name: 'Kampung Timur', code: 'RWY 34', x: 720, z: 120, elevation: 20, headingDeg: 345, length: 310, width: 26 },
+  { id: 'barat', name: 'Teluk Barat', code: 'RWY 15', x: -1020, z: -460, elevation: 24, headingDeg: 152, length: 300, width: 26 },
 ];
 
 export const VOLCANO_POS = { x: 760, z: -560, peakHeight: 435 };
 
 const ISLAND_BLOBS = [
-  // Pelabuhan Utama (South-West Harbor Island)
   { x: -720, z: 680, rx: 430, rz: 360, h: 118, ridge: 1.0 },
   { x: -940, z: 790, rx: 220, rz: 200, h: 165, ridge: 1.2 },
   { x: -500, z: 540, rx: 210, rz: 190, h: 42, ridge: 0.4 },
-  // Pulau Hijau (Central Emerald Island)
   { x: -120, z: -340, rx: 370, rz: 330, h: 128, ridge: 0.9 },
   { x: 40, z: -470, rx: 190, rz: 180, h: 158, ridge: 1.1 },
   { x: -270, z: -180, rx: 180, rz: 160, h: 45, ridge: 0.5 },
-  // Gunung Api & Kampung Timur (Volcanic East Island)
   { x: 760, z: -560, rx: 520, rz: 520, h: 445, volcano: true },
   { x: 740, z: 100, rx: 340, rz: 310, h: 78, ridge: 0.7 },
   { x: 960, z: -180, rx: 260, rz: 290, h: 195, ridge: 1.1 },
-  // Teluk Barat (West Bay & Karst Lagoon Island)
   { x: -1080, z: -480, rx: 380, rz: 340, h: 138, ridge: 1.0 },
   { x: -1240, z: -310, rx: 210, rz: 220, h: 175, ridge: 1.2 },
-  // Decorative Karst Islets & Coral Atolls along flight corridors
   { x: -410, z: 150, rx: 115, rz: 95, h: 64, ridge: 1.4 },
   { x: -340, z: 220, rx: 75, rz: 70, h: 38, ridge: 0.8 },
   { x: 250, z: 320, rx: 135, rz: 110, h: 72, ridge: 1.3 },
@@ -134,23 +85,18 @@ export function sampleTerrain(x, z) {
     } else {
       const gauss = Math.exp(-d2 * 1.45);
       const candidate = gauss * b.h - 14;
-      if (candidate > h) {
-        h = candidate;
-      }
+      if (candidate > h) h = candidate;
     }
   }
 
   if (h > -12) {
     const landWeight = smoothstep(-12, 18, h);
     h += terrainNoise(x, z) * landWeight * (1 - volcanoFactor * 0.45);
-    // Subtle terraced slopes on lush Indonesian hills
     if (h > 16 && h < 120 && volcanoFactor < 0.35) {
-      const step = Math.sin(h * 0.42) * 1.1;
-      h += step;
+      h += Math.sin(h * 0.42) * 1.1;
     }
   }
 
-  // Smoothly flatten airstrip terraces
   let onRunway = null;
   let runwayAlong = 0;
   let runwayCross = 0;
@@ -194,17 +140,21 @@ export function sampleTerrain(x, z) {
   };
 }
 
+/**
+ * Golden-monsoon storm-front sky dome: warm amber-gold tropical horizon rising
+ * into rich indigo-cobalt storm skies so tracers, fireballs, and reticles pop.
+ */
 function createSkyDome() {
   const skyGeo = new THREE.SphereGeometry(9000, 32, 20);
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
     uniforms: {
-      uTopColor: { value: new THREE.Color('#195898') },
-      uMidColor: { value: new THREE.Color('#66b6dc') },
-      uHorizonColor: { value: new THREE.Color('#f9cba0') },
-      uSunDir: { value: new THREE.Vector3(0.68, 0.25, -0.69).normalize() },
-      uSunColor: { value: new THREE.Color('#fff2c6') },
+      uTopColor: { value: new THREE.Color('#0f274c') },
+      uMidColor: { value: new THREE.Color('#2d5a8a') },
+      uHorizonColor: { value: new THREE.Color('#f4a259') },
+      uSunDir: { value: new THREE.Vector3(0.68, 0.22, -0.69).normalize() },
+      uSunColor: { value: new THREE.Color('#ffefb8') },
     },
     vertexShader: `
       varying vec3 vWorldDir;
@@ -224,11 +174,11 @@ function createSkyDome() {
       void main() {
         vec3 d = normalize(vWorldDir);
         float h = clamp(d.y, 0.0, 1.0);
-        vec3 col = mix(uHorizonColor, uMidColor, smoothstep(0.0, 0.24, h));
-        col = mix(col, uTopColor, smoothstep(0.22, 0.78, h));
+        vec3 col = mix(uHorizonColor, uMidColor, smoothstep(0.0, 0.25, h));
+        col = mix(col, uTopColor, smoothstep(0.22, 0.72, h));
         float sunAmt = max(dot(d, normalize(uSunDir)), 0.0);
-        col += vec3(1.0, 0.78, 0.45) * pow(sunAmt, 10.0) * 0.42;
-        col += uSunColor * smoothstep(0.9965, 0.9992, sunAmt) * 1.4;
+        col += vec3(1.0, 0.62, 0.26) * pow(sunAmt, 7.0) * 0.52;
+        col += uSunColor * smoothstep(0.996, 0.999, sunAmt) * 1.5;
         gl_FragColor = vec4(col, 1.0);
       }
     `,
@@ -243,11 +193,11 @@ function createOcean() {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uDeepColor: { value: new THREE.Color('#0c4f7a') },
-      uShallowColor: { value: new THREE.Color('#18a4a8') },
-      uSunDir: { value: new THREE.Vector3(0.68, 0.25, -0.69).normalize() },
-      uFogColor: { value: new THREE.Color('#e9cda8') },
-      uFogDensity: { value: 0.00018 },
+      uDeepColor: { value: new THREE.Color('#083354') },
+      uShallowColor: { value: new THREE.Color('#139099') },
+      uSunDir: { value: new THREE.Vector3(0.68, 0.22, -0.69).normalize() },
+      uFogColor: { value: new THREE.Color('#c9946b') },
+      uFogDensity: { value: 0.00017 },
     },
     vertexShader: `
       uniform float uTime;
@@ -281,16 +231,16 @@ function createOcean() {
 
         float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), 3.0);
         float lagoonBand = 0.5 + 0.5 * sin(vWorldPos.x * 0.0022) * cos(vWorldPos.z * 0.0021);
-        vec3 baseCol = mix(uDeepColor, uShallowColor, 0.32 + lagoonBand * 0.28 + fresnel * 0.25);
+        vec3 baseCol = mix(uDeepColor, uShallowColor, 0.32 + lagoonBand * 0.28 + fresnel * 0.26);
 
         vec3 halfVec = normalize(normalize(uSunDir) + viewDir);
-        float spec = pow(max(dot(normal, halfVec), 0.0), 96.0);
-        vec3 col = baseCol + vec3(1.0, 0.88, 0.65) * spec * 1.15;
-        col += vec3(0.88, 0.96, 1.0) * smoothstep(0.45, 0.72, vWave + n1 * 0.2) * 0.08;
+        float spec = pow(max(dot(normal, halfVec), 0.0), 78.0);
+        vec3 col = baseCol + vec3(1.0, 0.8, 0.48) * spec * 1.35;
+        col += vec3(0.9, 0.96, 1.0) * smoothstep(0.45, 0.72, vWave + n1 * 0.2) * 0.09;
 
         float dist = length(cameraPosition - vWorldPos);
         float fogFactor = 1.0 - exp(-pow(dist * uFogDensity, 2.0));
-        col = mix(col, uFogColor, clamp(fogFactor, 0.0, 0.92));
+        col = mix(col, uFogColor, clamp(fogFactor, 0.0, 0.9));
 
         gl_FragColor = vec4(col, 1.0);
       }
@@ -319,30 +269,19 @@ function createTerrainMesh() {
     const y = sample.rawHeight;
     pos.setY(i, y);
 
-    if (y < -2.0) {
-      col.set('#1aa3a4'); // shallow coral turquoise reef
-    } else if (y < 3.6) {
-      col.set('#e4cda0'); // warm sandy beach
-    } else if (sample.onRunway) {
-      col.set('#4c7b43'); // manicured airstrip verge
-    } else if (sample.volcanoFactor > 0.56 && y > 180) {
-      if (y > 392) {
-        col.set('#8f3c25'); // warm volcanic caldera rim
-      } else {
-        col.set('#4c4746'); // dark volcanic basalt slope
-      }
+    if (y < -2.0) col.set('#149299');
+    else if (y < 3.6) col.set('#e2c693');
+    else if (sample.onRunway) col.set('#477541');
+    else if (sample.volcanoFactor > 0.56 && y > 180) {
+      col.set(y > 392 ? '#a84223' : '#433e3e');
     } else if (y < 42) {
-      const t = (y - 3.6) / 38.4;
-      col.set('#5fa449').lerp(new THREE.Color('#39803f'), t);
+      col.set('#599c45').lerp(new THREE.Color('#327439'), (y - 3.6) / 38.4);
     } else if (y < 140) {
-      const t = (y - 42) / 98;
-      col.set('#39803f').lerp(new THREE.Color('#285e36'), t);
+      col.set('#327439').lerp(new THREE.Color('#235431'), (y - 42) / 98);
     } else {
-      const t = Math.min(1, (y - 140) / 140);
-      col.set('#285e36').lerp(new THREE.Color('#5a534a'), t);
+      col.set('#235431').lerp(new THREE.Color('#534b44'), Math.min(1, (y - 140) / 140));
     }
 
-    // Subtle organic variation
     const v = 0.94 + 0.12 * Math.sin(x * 0.045 + z * 0.037);
     colors[i * 3] = Math.min(1, col.r * v);
     colors[i * 3 + 1] = Math.min(1, col.g * v);
@@ -352,13 +291,10 @@ function createTerrainMesh() {
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
 
-  const mat = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.9,
-    metalness: 0.02,
-  });
-
-  const mesh = new THREE.Mesh(geo, mat);
+  const mesh = new THREE.Mesh(
+    geo,
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.02 })
+  );
   mesh.receiveShadow = true;
   return mesh;
 }
@@ -369,38 +305,28 @@ function createRunwayTexture(code) {
   canvas.height = 1024;
   const ctx = canvas.getContext('2d');
 
-  // Weathered tropical asphalt base
-  ctx.fillStyle = '#333840';
+  ctx.fillStyle = '#31363e';
   ctx.fillRect(0, 0, 256, 1024);
-
-  // Subtle tire rubber & texture bands
-  ctx.fillStyle = 'rgba(20, 23, 28, 0.35)';
+  ctx.fillStyle = 'rgba(20, 23, 28, 0.36)';
   ctx.fillRect(88, 130, 80, 760);
 
-  // Edge lines
   ctx.fillStyle = '#e7e2d3';
   ctx.fillRect(14, 16, 6, 992);
   ctx.fillRect(236, 16, 6, 992);
 
-  // Threshold piano keys (both ends)
   for (let i = 0; i < 6; i++) {
     const x = 32 + i * 33;
     ctx.fillRect(x, 26, 18, 56);
     ctx.fillRect(x, 942, 18, 56);
   }
-
-  // Centerline dashes
   for (let y = 170; y < 840; y += 64) {
     ctx.fillRect(123, y, 10, 34);
   }
-
-  // Aiming point blocks
   ctx.fillRect(46, 160, 30, 74);
   ctx.fillRect(180, 160, 30, 74);
   ctx.fillRect(46, 790, 30, 74);
   ctx.fillRect(180, 790, 30, 74);
 
-  // Runway number
   ctx.fillStyle = '#f2ede0';
   ctx.font = 'bold 54px monospace';
   ctx.textAlign = 'center';
@@ -418,38 +344,28 @@ function buildAirstripProps(strip, windsocks, papiGroups, beacons) {
   group.position.set(strip.x, strip.elevation + 0.14, strip.z);
   group.rotation.y = -rad;
 
-  // Main asphalt strip
-  const rwyTex = createRunwayTexture(strip.code);
-  const rwyMat = new THREE.MeshStandardMaterial({
-    map: rwyTex,
-    roughness: 0.85,
-    metalness: 0.05,
-  });
-  const rwyMesh = new THREE.Mesh(new THREE.PlaneGeometry(strip.width, strip.length), rwyMat);
+  const rwyMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(strip.width, strip.length),
+    new THREE.MeshStandardMaterial({ map: createRunwayTexture(strip.code), roughness: 0.85, metalness: 0.05 })
+  );
   rwyMesh.rotation.x = -Math.PI / 2;
   rwyMesh.receiveShadow = true;
   group.add(rwyMesh);
 
-  // Gravel shoulders
-  const shoulderMat = new THREE.MeshStandardMaterial({ color: '#786e5c', roughness: 0.95 });
   const shoulder = new THREE.Mesh(
     new THREE.PlaneGeometry(strip.width + 12, strip.length + 14),
-    shoulderMat
+    new THREE.MeshStandardMaterial({ color: '#786e5c', roughness: 0.95 })
   );
   shoulder.rotation.x = -Math.PI / 2;
   shoulder.position.y = -0.05;
   group.add(shoulder);
 
-  // Runway edge lights
   const edgeGeo = new THREE.SphereGeometry(0.55, 8, 8);
   const whiteEmissive = new THREE.MeshBasicMaterial({ color: '#fff3c4' });
   const greenEmissive = new THREE.MeshBasicMaterial({ color: '#39f08a' });
-  const redEmissive = new THREE.MeshBasicMaterial({ color: '#ff4b4b' });
-
-  const steps = 8;
-  for (let i = 0; i <= steps; i++) {
-    const z = -strip.length * 0.5 + (strip.length * i) / steps;
-    const mat = i === 0 || i === steps ? greenEmissive : whiteEmissive;
+  for (let i = 0; i <= 8; i++) {
+    const z = -strip.length * 0.5 + (strip.length * i) / 8;
+    const mat = i === 0 || i === 8 ? greenEmissive : whiteEmissive;
     for (const side of [-1, 1]) {
       const lamp = new THREE.Mesh(edgeGeo, mat);
       lamp.position.set(side * (strip.width * 0.5 + 1.4), 0.5, z);
@@ -457,7 +373,6 @@ function buildAirstripProps(strip, windsocks, papiGroups, beacons) {
     }
   }
 
-  // PAPI glideslope lights (left of approach end, +Z threshold)
   const papiLights = [];
   for (let i = 0; i < 4; i++) {
     const housing = new THREE.Mesh(
@@ -477,23 +392,19 @@ function buildAirstripProps(strip, windsocks, papiGroups, beacons) {
   }
   papiGroups.push({ strip, lights: papiLights });
 
-  // Rustic Bush Hangar beside apron
-  const hangar = new THREE.Group();
-  hangar.position.set(strip.width * 0.5 + 24, 0, -24);
   const wallMat = new THREE.MeshStandardMaterial({ color: '#dfd6c2', roughness: 0.85 });
   const roofMat = new THREE.MeshStandardMaterial({ color: '#b83c2d', roughness: 0.7 });
   const darkMat = new THREE.MeshStandardMaterial({ color: '#1b242c', roughness: 0.9 });
 
+  const hangar = new THREE.Group();
+  hangar.position.set(strip.width * 0.5 + 24, 0, -24);
   const body = new THREE.Mesh(new THREE.BoxGeometry(20, 7.5, 16), wallMat);
   body.position.y = 3.75;
   hangar.add(body);
-
   const doorOpening = new THREE.Mesh(new THREE.PlaneGeometry(11, 5.5), darkMat);
   doorOpening.position.set(-10.05, 2.8, 0);
   doorOpening.rotation.y = -Math.PI / 2;
   hangar.add(doorOpening);
-
-  // Corrugated pitched tropical hangar roof
   const roof = new THREE.Mesh(new THREE.ConeGeometry(14.5, 4.2, 4), roofMat);
   roof.rotation.y = Math.PI / 4;
   roof.scale.set(1.06, 1, 0.88);
@@ -501,7 +412,6 @@ function buildAirstripProps(strip, windsocks, papiGroups, beacons) {
   hangar.add(roof);
   group.add(hangar);
 
-  // Control Shack & Blinking Aviation Beacon Mast
   const tower = new THREE.Group();
   tower.position.set(strip.width * 0.5 + 20, 0, 18);
   const shack = new THREE.Mesh(new THREE.BoxGeometry(7, 5.5, 7), wallMat);
@@ -517,14 +427,12 @@ function buildAirstripProps(strip, windsocks, papiGroups, beacons) {
   capRoof.position.y = 8.9;
   capRoof.rotation.y = Math.PI / 4;
   tower.add(capRoof);
-
   const mast = new THREE.Mesh(
     new THREE.CylinderGeometry(0.16, 0.24, 10, 6),
     new THREE.MeshStandardMaterial({ color: '#e8e4da' })
   );
   mast.position.set(3.5, 10, 0);
   tower.add(mast);
-
   const beaconMat = new THREE.MeshBasicMaterial({ color: '#ff3b3b' });
   const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 8), beaconMat);
   beacon.position.set(3.5, 15.2, 0);
@@ -532,7 +440,6 @@ function buildAirstripProps(strip, windsocks, papiGroups, beacons) {
   beacons.push(beaconMat);
   group.add(tower);
 
-  // Animated Windsock
   const pole = new THREE.Mesh(
     new THREE.CylinderGeometry(0.14, 0.18, 7.5, 6),
     new THREE.MeshStandardMaterial({ color: '#ececec' })
@@ -561,15 +468,13 @@ function buildAirstripProps(strip, windsocks, papiGroups, beacons) {
 
 function buildArchipelagoProps(scene) {
   const group = new THREE.Group();
-
-  // Deterministic pseudo-random helper
   let seed = 4219;
   const rand = () => {
     seed = (seed * 16807) % 2147483647;
     return (seed - 1) / 2147483646;
   };
 
-  // --- Instanced Coconut Palms ---
+  // Instanced Coconut Palms
   const palmPositions = [];
   for (let i = 0; i < 420; i++) {
     const x = (rand() - 0.5) * 2800;
@@ -577,7 +482,6 @@ function buildArchipelagoProps(scene) {
     const s = sampleTerrain(x, z);
     if (s.isWater || s.onRunway || s.height < 2.2 || s.height > 88 || s.volcanoFactor > 0.45) continue;
 
-    // Keep clear of runway approaches
     let tooClose = false;
     for (const strip of AIRSTRIPS) {
       const { fwdX, fwdZ, rightX, rightZ } = getRunwayBasis(strip);
@@ -594,13 +498,10 @@ function buildArchipelagoProps(scene) {
 
   const trunkGeo = new THREE.CylinderGeometry(0.24, 0.48, 8.5, 6);
   trunkGeo.translate(0, 4.25, 0);
-  const trunkMat = new THREE.MeshStandardMaterial({ color: '#7a5a3a', roughness: 0.92 });
-  const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, palmPositions.length);
-
   const crownGeo = new THREE.ConeGeometry(4.2, 3.2, 7);
   crownGeo.translate(0, 8.8, 0);
-  const crownMat = new THREE.MeshStandardMaterial({ color: '#2f8a3c', roughness: 0.85 });
-  const crownInst = new THREE.InstancedMesh(crownGeo, crownMat, palmPositions.length);
+  const trunkInst = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: '#7a5a3a', roughness: 0.92 }), palmPositions.length);
+  const crownInst = new THREE.InstancedMesh(crownGeo, new THREE.MeshStandardMaterial({ color: '#2a7f38', roughness: 0.85 }), palmPositions.length);
 
   const dummy = new THREE.Object3D();
   palmPositions.forEach((p, idx) => {
@@ -613,7 +514,7 @@ function buildArchipelagoProps(scene) {
   });
   group.add(trunkInst, crownInst);
 
-  // --- Kampong Village Clusters (Terracotta Indonesian Roofs) ---
+  // Kampong Villages
   const villageCenters = [
     { x: -535, z: 720, count: 18 },
     { x: -790, z: 540, count: 14 },
@@ -622,15 +523,11 @@ function buildArchipelagoProps(scene) {
     { x: 830, z: 180, count: 18 },
     { x: -910, z: -510, count: 16 },
   ];
-
   const houseWallGeo = new THREE.BoxGeometry(7.2, 4.2, 6.2);
   houseWallGeo.translate(0, 2.1, 0);
   const houseRoofGeo = new THREE.ConeGeometry(5.6, 3.4, 4);
   houseRoofGeo.rotateY(Math.PI / 4);
   houseRoofGeo.translate(0, 5.7, 0);
-
-  const houseWallMat = new THREE.MeshStandardMaterial({ color: '#f2ead8', roughness: 0.85 });
-  const houseRoofMat = new THREE.MeshStandardMaterial({ color: '#c4492d', roughness: 0.78 });
 
   const houseList = [];
   for (const vc of villageCenters) {
@@ -644,9 +541,8 @@ function buildArchipelagoProps(scene) {
       houseList.push({ x: hx, y: s.height, z: hz, rot: rand() * Math.PI * 2, sc: 0.8 + rand() * 0.45 });
     }
   }
-
-  const wallInst = new THREE.InstancedMesh(houseWallGeo, houseWallMat, houseList.length);
-  const roofInst = new THREE.InstancedMesh(houseRoofGeo, houseRoofMat, houseList.length);
+  const wallInst = new THREE.InstancedMesh(houseWallGeo, new THREE.MeshStandardMaterial({ color: '#f2ead8', roughness: 0.85 }), houseList.length);
+  const roofInst = new THREE.InstancedMesh(houseRoofGeo, new THREE.MeshStandardMaterial({ color: '#c4492d', roughness: 0.78 }), houseList.length);
   houseList.forEach((h, idx) => {
     dummy.position.set(h.x, h.y - 0.3, h.z);
     dummy.rotation.set(0, h.rot, 0);
@@ -657,7 +553,7 @@ function buildArchipelagoProps(scene) {
   });
   group.add(wallInst, roofInst);
 
-  // --- Wooden Outrigger Perahu Boats in Turquoise Bays ---
+  // Perahu Outrigger Boats
   const boatCoords = [
     [-470, 460], [-510, 410], [-360, -80], [-210, -40],
     [520, 220], [580, 310], [-820, -340], [-760, -290],
@@ -665,68 +561,78 @@ function buildArchipelagoProps(scene) {
   ];
   const hullMat = new THREE.MeshStandardMaterial({ color: '#5c3b24', roughness: 0.8 });
   const sailMat = new THREE.MeshStandardMaterial({ color: '#fff4dc', roughness: 0.7, side: THREE.DoubleSide });
-
   for (let i = 0; i < boatCoords.length; i++) {
     const [bx, bz] = boatCoords[i];
     const boat = new THREE.Group();
     boat.position.set(bx, 0.6, bz);
     boat.rotation.y = (i * 1.1) % (Math.PI * 2);
-
-    const hull = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.1, 10.5), hullMat);
-    boat.add(hull);
+    boat.add(new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.1, 10.5), hullMat));
     const outrigger = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.28, 0.45), hullMat);
     outrigger.position.y = 0.25;
     boat.add(outrigger);
     const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 7.5, 5), hullMat);
     mast.position.y = 3.8;
     boat.add(mast);
-    const sailGeo = new THREE.ConeGeometry(3.2, 6.2, 3);
-    const sail = new THREE.Mesh(sailGeo, sailMat);
+    const sail = new THREE.Mesh(new THREE.ConeGeometry(3.2, 6.2, 3), sailMat);
     sail.position.set(0.5, 4.1, 0.4);
     sail.scale.set(0.2, 1, 1);
     boat.add(sail);
     group.add(boat);
   }
 
-  // --- Sunlit Cumulus Clouds ---
+  // Sculpted Golden-Monsoon Storm Clouds (warm sunlit tops, brooding slate-blue bellies)
   const cloudGroup = new THREE.Group();
-  const cloudMat = new THREE.MeshStandardMaterial({
-    color: '#fffbf2',
-    emissive: '#6e5c4a',
+  const cloudTopMat = new THREE.MeshStandardMaterial({
+    color: '#ffe3bd',
+    emissive: '#784e30',
     emissiveIntensity: 0.42,
-    roughness: 0.92,
-    metalness: 0,
+    roughness: 0.9,
     transparent: true,
     opacity: 0.92,
   });
+  const cloudBellyMat = new THREE.MeshStandardMaterial({
+    color: '#465874',
+    emissive: '#222d42',
+    emissiveIntensity: 0.38,
+    roughness: 0.96,
+    transparent: true,
+    opacity: 0.88,
+  });
   const puffGeo = new THREE.SphereGeometry(1, 10, 8);
-  for (let c = 0; c < 34; c++) {
+  for (let c = 0; c < 36; c++) {
     const cx = (rand() - 0.5) * 4400;
     const cz = (rand() - 0.5) * 4000;
-    const cy = 285 + rand() * 140;
+    const cy = 290 + rand() * 145;
     const cluster = new THREE.Group();
     cluster.position.set(cx, cy, cz);
     const puffs = 3 + Math.floor(rand() * 4);
     for (let p = 0; p < puffs; p++) {
-      const m = new THREE.Mesh(puffGeo, cloudMat);
       const r = 24 + rand() * 26;
-      m.scale.set(r * 1.4, r * 0.68, r * 1.15);
-      m.position.set((p - puffs * 0.5) * 26, (rand() - 0.3) * 10, (rand() - 0.5) * 24);
-      cluster.add(m);
+      const top = new THREE.Mesh(puffGeo, cloudTopMat);
+      top.scale.set(r * 1.4, r * 0.65, r * 1.15);
+      top.position.set((p - puffs * 0.5) * 26, (rand() - 0.1) * 10, (rand() - 0.5) * 24);
+      cluster.add(top);
+
+      if (p % 2 === 0) {
+        const belly = new THREE.Mesh(puffGeo, cloudBellyMat);
+        belly.scale.set(r * 1.45, r * 0.48, r * 1.2);
+        belly.position.set((p - puffs * 0.5) * 26, -r * 0.38, (rand() - 0.5) * 20);
+        cluster.add(belly);
+      }
     }
     cloudGroup.add(cluster);
   }
   group.add(cloudGroup);
 
-  // --- Gunung Api Volcanic Ash/Steam Plume ---
+  // Gunung Api Volcanic Ash Plume + Rising Embers
   const plumePuffs = [];
   const plumeMat = new THREE.MeshStandardMaterial({
-    color: '#eae0d6',
-    emissive: '#584b44',
-    emissiveIntensity: 0.36,
+    color: '#d8ccc4',
+    emissive: '#58382c',
+    emissiveIntensity: 0.42,
     roughness: 1,
     transparent: true,
-    opacity: 0.52,
+    opacity: 0.56,
   });
   for (let i = 0; i < 16; i++) {
     const puff = new THREE.Mesh(new THREE.SphereGeometry(16 + i * 3.8, 10, 8), plumeMat);
@@ -734,31 +640,36 @@ function buildArchipelagoProps(scene) {
     plumePuffs.push({ mesh: puff, phase: i / 16 });
   }
 
-  // --- Glowing Caldera Core ---
+  const embers = [];
+  const emberMat = new THREE.MeshBasicMaterial({ color: '#ff8a2b' });
+  const emberGeo = new THREE.SphereGeometry(2.2, 6, 6);
+  for (let i = 0; i < 14; i++) {
+    const em = new THREE.Mesh(emberGeo, emberMat);
+    group.add(em);
+    embers.push({ mesh: em, phase: i / 14, ang: i * 1.7 });
+  }
+
   const lava = new THREE.Mesh(
-    new THREE.CircleGeometry(32, 16),
-    new THREE.MeshBasicMaterial({ color: '#ff6e26' })
+    new THREE.CircleGeometry(34, 16),
+    new THREE.MeshBasicMaterial({ color: '#ff661c' })
   );
   lava.rotation.x = -Math.PI / 2;
   lava.position.set(VOLCANO_POS.x, 386, VOLCANO_POS.z);
   group.add(lava);
 
   scene.add(group);
-  return { cloudGroup, plumePuffs };
+  return { cloudGroup, plumePuffs, embers };
 }
 
-/**
- * Create the complete Indonesian archipelago world, lighting, ocean, terrain, airstrips, and props.
- */
 export function createWorld(scene) {
-  scene.fog = new THREE.FogExp2('#e9cda8', 0.00018);
+  scene.fog = new THREE.FogExp2('#c9946b', 0.00017);
 
-  // Golden-hour Indonesian sunlit lighting
-  const hemiLight = new THREE.HemisphereLight('#a7dbff', '#3a6646', 1.05);
+  // Dramatic golden-monsoon storm-interceptor lighting
+  const hemiLight = new THREE.HemisphereLight('#85b6e8', '#2f523a', 1.0);
   scene.add(hemiLight);
 
-  const sunLight = new THREE.DirectionalLight('#ffe4b5', 2.05);
-  sunLight.position.set(900, 360, -900);
+  const sunLight = new THREE.DirectionalLight('#ffd08a', 2.2);
+  sunLight.position.set(900, 340, -900);
   sunLight.castShadow = true;
   sunLight.shadow.mapSize.set(1024, 1024);
   sunLight.shadow.camera.near = 100;
@@ -770,14 +681,10 @@ export function createWorld(scene) {
   sunLight.shadow.camera.bottom = -d;
   scene.add(sunLight);
 
-  const sky = createSkyDome();
-  scene.add(sky);
-
+  scene.add(createSkyDome());
   const ocean = createOcean();
   scene.add(ocean.mesh);
-
-  const terrain = createTerrainMesh();
-  scene.add(terrain);
+  scene.add(createTerrainMesh());
 
   const windsocks = [];
   const papiGroups = [];
@@ -786,15 +693,12 @@ export function createWorld(scene) {
     scene.add(buildAirstripProps(strip, windsocks, papiGroups, beacons));
   }
 
-  const { cloudGroup, plumePuffs } = buildArchipelagoProps(scene);
+  const { cloudGroup, plumePuffs, embers } = buildArchipelagoProps(scene);
 
   function update(elapsed, dt, planePos, windDirRad) {
     ocean.material.uniforms.uTime.value = elapsed;
-
-    // Gentle cloud drift
     cloudGroup.position.x = Math.sin(elapsed * 0.006) * 45;
 
-    // Rising Gunung Api volcanic plume
     for (let i = 0; i < plumePuffs.length; i++) {
       const p = plumePuffs[i];
       const t = (p.phase + elapsed * 0.045) % 1;
@@ -807,18 +711,26 @@ export function createWorld(scene) {
       p.mesh.scale.set(s, s * 0.75, s);
     }
 
-    // Swaying windsocks aligned to wind
+    for (let i = 0; i < embers.length; i++) {
+      const em = embers[i];
+      const t = (em.phase + elapsed * 0.14) % 1;
+      em.mesh.position.set(
+        VOLCANO_POS.x + Math.cos(em.ang + elapsed) * (14 + t * 28),
+        392 + t * 105,
+        VOLCANO_POS.z + Math.sin(em.ang + elapsed) * (14 + t * 28)
+      );
+      em.mesh.scale.setScalar(1.2 - t * 0.85);
+    }
+
     for (let i = 0; i < windsocks.length; i++) {
       windsocks[i].rotation.y = windDirRad + Math.sin(elapsed * 4.2 + i) * 0.14;
     }
 
-    // Blinking red radio beacons
     const blink = Math.sin(elapsed * 5.0) > 0.25;
     for (let i = 0; i < beacons.length; i++) {
       beacons[i].color.set(blink ? '#ff3838' : '#551212');
     }
 
-    // Dynamic PAPI glideslope feedback relative to aircraft position
     if (planePos) {
       for (const pg of papiGroups) {
         const s = pg.strip;
@@ -826,7 +738,6 @@ export function createWorld(scene) {
         if (dist > 1400) continue;
         const altAboveStrip = Math.max(0, planePos.y - s.elevation);
         const angleDeg = (Math.atan2(altAboveStrip, Math.max(30, dist - s.length * 0.3)) * 180) / Math.PI;
-        // 4 lights: optimal ~4.5 deg => 2 white, 2 red
         const thresholds = [2.6, 3.8, 5.2, 6.6];
         for (let k = 0; k < 4; k++) {
           pg.lights[k].color.set(angleDeg >= thresholds[k] ? '#fffbe6' : '#ff3030');
